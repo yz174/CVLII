@@ -1,0 +1,274 @@
+/* TUI Resume - Textual CSS Styling */
+
+/* Welcome Screen */
+WelcomeScreen {
+    background: $background;
+}
+
+#welcome-container {
+    width: 100%;
+    height: 100%;
+    align: center middle;
+    layout: vertical;
+}
+
+#cvli-title {
+    width: 100%;
+    text-align: center;
+    margin-bottom: 1;
+}
+
+#version {
+    width: 100%;
+    text-align: center;
+    margin-bottom: 2;
+}
+
+#welcome-animation {
+    width: 100%;
+    text-align: center;
+    height: 3;
+    margin: 2 0;
+}
+
+#continue-prompt {
+    width: 100%;
+    text-align: center;
+    margin-top: 2;
+}
+
+/* Global Screen Layout */
+Screen {
+    layout: vertical;
+    background: $background;
+}
+
+/* Navigation Bar - Docked at Top */
+NavBar {
+    dock: top;
+    height: 3;
+    background: $panel;
+    border-bottom: heavy $primary;
+    content-align: center middle;
+}
+
+/* Content Container */
+#content-container {
+    height: 100%;
+    overflow-y: auto;
+    background: $background;
+}
+
+/* Generative Background */
+GenerativeBackground {
+    width: 100%;
+    height: 100%;
+    color: $success;
+    text-style: none;
+}
+
+/* Projects Screen */
+ProjectsScreen {
+    background: $background;
+}
+
+#projects-container {
+    height: auto;
+    padding: 2 4;
+}
+
+ProjectCard {
+    width: 100%;
+    height: auto;
+    margin: 1 0;
+    border: heavy $primary;
+    background: $panel;
+    padding: 1 2;
+}
+
+ProjectCard:hover {
+    border: heavy $success;
+    background: $surface;
+}
+
+ProjectCard .title {
+    text-style: bold;
+    color: $accent;
+}
+
+ProjectCard .description {
+    color: $text;
+    margin: 1 0;
+}
+
+ProjectCard .tech-badge {
+    background: $primary;
+    color: $text;
+    padding: 0 1;
+    margin: 0 1;
+}
+
+/* About Screen */
+AboutScreen {
+    background: $background;
+}
+
+#about-container {
+    layout: grid;
+    grid-size: 2 1;
+    grid-columns: 3fr 2fr;
+    padding: 2 4;
+    height: auto;
+}
+
+#bio-section {
+    padding: 1 2;
+    border: heavy $primary;
+    background: $panel;
+    margin-right: 2;
+}
+
+#skills-section {
+    padding: 1 2;
+    border: heavy $primary;
+    background: $panel;
+}
+
+.section-title {
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+.skill-category {
+    margin: 1 0;
+    color: $success;
+    text-style: bold;
+}
+
+.skill-list {
+    color: $text;
+    margin-left: 2;
+}
+
+/* Game Screen */
+GameScreen {
+    background: $background;
+}
+
+#game-container {
+    width: 100%;
+    height: 100%;
+    align: center middle;
+}
+
+#game-board {
+    width: auto;
+    height: auto;
+    border: heavy $success;
+    background: $panel;
+    padding: 2;
+}
+
+#game-instructions {
+    text-align: center;
+    color: $warning;
+    margin-bottom: 1;
+}
+
+#game-status {
+    text-align: center;
+    color: $accent;
+    margin-top: 1;
+}
+
+/* Contact Screen */
+ContactScreen {
+    background: $background;
+}
+
+#contact-container {
+    width: 80;
+    height: auto;
+    align: center middle;
+    border: double $success;
+    background: $panel;
+    padding: 3;
+}
+
+#contact-title {
+    text-align: center;
+    text-style: bold;
+    color: $success;
+    margin-bottom: 2;
+}
+
+#contact-details {
+    margin: 2 0;
+    color: $text;
+}
+
+.contact-label {
+    color: $accent;
+    text-style: bold;
+}
+
+.contact-value {
+    color: $text;
+    margin-left: 2;
+}
+
+/* Matrix Text Effect */
+MatrixText {
+    color: $success;
+}
+
+MatrixText.decoding {
+    color: $warning;
+    text-style: bold;
+}
+
+MatrixText.decoded {
+    color: $text;
+    text-style: none;
+}
+
+/* Buttons */
+Button {
+    width: auto;
+    margin: 1 0;
+}
+
+Button:hover {
+    background: $success;
+    color: $background;
+}
+
+Button:focus {
+    border: heavy $accent;
+}
+
+/* Utility Classes */
+.center-text {
+    text-align: center;
+}
+
+.bold {
+    text-style: bold;
+}
+
+.muted {
+    color: $text-muted;
+}
+
+.success {
+    color: $success;
+}
+
+.warning {
+    color: $warning;
+}
+
+.error {
+    color: $error;
+}
