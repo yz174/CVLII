@@ -1,0 +1,86 @@
+"""Project card widget for displaying project information"""
+
+from textual.widget import Widget
+from textual.containers import Container
+from textual.widgets import Static, Label
+from rich.text import Text
+from rich.panel import Panel
+
+
+class ProjectCard(Widget):
+    """Card widget for displaying a single project"""
+    
+    DEFAULT_CSS = """
+    ProjectCard {
+        width: 100%;
+        height: auto;
+        margin: 1 0;
+        padding: 1 2;
+        border: heavy $primary;
+        background: $panel;
+    }
+    
+    ProjectCard:hover {
+        border: heavy $success;
+    }
+    
+    ProjectCard .project-title {
+        text-style: bold;
+        color: $accent;
+    }
+    
+    ProjectCard .project-description {
+        color: $text;
+    }
+    
+    ProjectCard .project-tech {
+        color: $success;
+        text-style: italic;
+    }
+    
+    ProjectCard .project-link {
+        color: $warning;
+    }
+    """
+    
+    def __init__(
+        self,
+        title: str,
+        description: str,
+        tech_stack: list[str],
+        link: str = "",
+        *args,
+        **kwargs
+    ):
+        super().__init__(*args, **kwargs)
+        self.title = title
+        self.description = description
+        self.tech_stack = tech_stack
+        self.link = link
+    
+    def render(self) -> Text:
+        """Render the project card"""
+        text = Text()
+        
+        # Title
+        text.append(f"📦 {self.title}\n", style="bold cyan")
+        text.append("\n")
+        
+        # Description
+        text.append(f"{self.description}\n", style="white")
+        text.append("\n")
+        
+        # Tech Stack
+        text.append("Tech Stack: ", style="dim")
+        for i, tech in enumerate(self.tech_stack):
+            if i > 0:
+                text.append(" • ", style="dim")
+            text.append(tech, style="green")
+        text.append("\n")
+        
+        # Link (if provided)
+        if self.link:
+            text.append("\n")
+            text.append(f"🔗 {self.link}", style="yellow underline")
+        
+        return text
