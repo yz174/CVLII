@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  tui-resume:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: resume-app
+    ports:
+      # Map host port 22 to container port 2222
+      - "22:2222"
+    volumes:
+      # Persist SSH host key (important for client trust)
+      - ./host_key:/app/host_key:ro
+      - ./host_key.pub:/app/host_key.pub:ro
+      # Persist logs outside container
+      - ./logs:/app/logs
+    restart: always
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TERM=xterm-256color
+    networks:
+      - resume-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  resume-network:
+    driver: bridge
