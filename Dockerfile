@@ -46,4 +46,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import socket; s=socket.socket(); s.connect(('localhost', 2222)); s.close()"
 
 # Run the SSH server (for production deployment)  
-CMD ["python", "-m", "src.tui_resume.ssh_server_inline"]
+CMD ["python", "-m", "src.tui_resume.ssh_server"]
