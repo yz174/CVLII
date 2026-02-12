@@ -5,6 +5,7 @@ from .generative_bg import GenerativeBackground
 from .matrix_text import MatrixText
 from .project_card import ProjectCard
 from .falling_ascii import FallingASCII
+from .home_greeting import HomeGreeting
 
 __all__ = [
     "NavBar",
@@ -12,4 +13,5 @@ __all__ = [
     "MatrixText",
     "ProjectCard",
     "FallingASCII",
+    "HomeGreeting",
 ]

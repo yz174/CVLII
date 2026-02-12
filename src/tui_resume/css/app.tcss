@@ -72,15 +72,23 @@ ProjectsScreen {
     background: $background;
 }
 
-#projects-container {
-    height: auto;
+#projects-scroll {
+    height: 1fr;
     padding: 2 4;
+    overflow-y: auto;
+}
+
+#projects-container {
+    grid-size: 2 3;
+    grid-gutter: 2 2;
+    height: auto;
+    width: 100%;
 }
 
 ProjectCard {
     width: 100%;
-    height: auto;
-    margin: 1 0;
+    height: 100%;
+    min-height: 15;
     border: heavy $primary;
     background: $panel;
     padding: 1 2;
@@ -88,6 +96,11 @@ ProjectCard {
 
 ProjectCard:hover {
     border: heavy $success;
+    background: $surface;
+}
+
+ProjectCard:focus {
+    border: heavy $accent;
     background: $surface;
 }
 
@@ -124,14 +137,14 @@ AboutScreen {
 #bio-section {
     padding: 1 2;
     border: heavy $primary;
-    background: $panel;
+    background: $background;
     margin-right: 2;
 }
 
 #skills-section {
     padding: 1 2;
     border: heavy $primary;
-    background: $panel;
+    background: $background;
 }
 
 .section-title {
