@@ -2,7 +2,6 @@
 
 import sys
 import os
-import io
 
 # Force unbuffered output
 os.environ['PYTHONUNBUFFERED'] = '1'
@@ -10,54 +9,6 @@ os.environ['PYTHONUNBUFFERED'] = '1'
 # Ensure TERM is set
 if 'TERM' not in os.environ:
     os.environ['TERM'] = 'xterm-256color'
-
-# Create a filter for stdout that blocks terminal query sequences
-class QueryFilterStream:
-    """Filters out terminal query escape sequences that would cause responses"""
-    def __init__(self, stream):
-        self.stream = stream
-        self.buffer = b''
-    
-    def write(self, data):
-        if isinstance(data, str):
-            data = data.encode('utf-8')
-        
-        # Filter out common terminal query sequences that cause responses:
-        # ESC[6n - Cursor Position Report (CPR)
-        # ESC[c or ESC[>c or ESC[>0c - Device Attributes (DA)
-        # ESC[?...$ - DECRQM requests
-        # ESC]...ST - Operating System Commands that query
-        filtered = data
-        
-        # Remove cursor position queries
-        filtered = filtered.replace(b'\x1b[6n', b'')
-        
-        # Remove device attribute queries
-        filtered = filtered.replace(b'\x1b[c', b'')
-        filtered = filtered.replace(b'\x1b[>c', b'')
-        filtered = filtered.replace(b'\x1b[>0c', b'')
-        filtered = filtered.replace(b'\x1b[=c', b'')
-        
-        # Remove DECRQM queries (these generate responses like "?2048;0$y")
-        # Pattern: ESC[?<digits>$p
-        import re
-        filtered = re.sub(rb'\x1b\[\?\d+\$p', b'', filtered)
-        
-        # Remove other query sequences
-        filtered = re.sub(rb'\x1b\[>\d*c', b'', filtered)
-        
-        if filtered:
-            self.stream.write(filtered)
-        return len(data)
-    
-    def flush(self):
-        self.stream.flush()
-    
-    def __getattr__(self, name):
-        return getattr(self.stream, name)
-
-# Wrap stdout with query filter
-sys.stdout = QueryFilterStream(sys.stdout.buffer if hasattr(sys.stdout, 'buffer') else sys.stdout)
 
 # Import and patch before creating the app
 from src.tui_resume.app import ResumeApp

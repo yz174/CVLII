@@ -121,8 +121,12 @@ async def handle_client(process: SSHServerProcess) -> None:
                         buffer += data
                         
                         # Filter out terminal query responses (CSI responses)
-                        # These include: cursor position reports, device attributes, etc.
-                        # Pattern: ESC [ digits ; digits $ followed by letter or ESC [ digits ; digits R
+                        # These include: cursor position reports, device attributes, mode reports, etc.
+                        # Patterns to filter:
+                        # - ESC[digits;digitsR (cursor position report)
+                        # - ESC[?digits;digits$letter (mode report like ?2048;0$y)
+                        # - ESC[digits;digits$letter (other reports)
+                        # - ESC[<...M or ESC[<...m (mouse sequences)
                         filtered = b""
                         i = 0
                         while i < len(buffer):
@@ -130,19 +134,27 @@ async def handle_client(process: SSHServerProcess) -> None:
                             if i < len(buffer) - 1 and buffer[i:i+1] == b'\x1b' and i+1 < len(buffer) and buffer[i+1:i+2] == b'[':
                                 # This is a CSI sequence, check if it's a response
                                 j = i + 2
+                                
+                                # Check for optional ? or > after [
+                                if j < len(buffer) and buffer[j:j+1] in b'?>':
+                                    j += 1
+                                
                                 # Skip digits, semicolons
                                 while j < len(buffer) and buffer[j:j+1] in b'0123456789;':
                                     j += 1
+                                
                                 # Check for response terminators: $ followed by letter, or R, or ~ etc.
                                 if j < len(buffer):
                                     terminator = buffer[j:j+1]
-                                    if terminator in b'R$~':
-                                        # This is a response, skip it
-                                        if terminator == b'$' and j+1 < len(buffer):
-                                            # Skip the letter after $
+                                    if terminator == b'$':
+                                        # Mode report: skip $ and the following letter
+                                        if j+1 < len(buffer):
+                                            # This is a response like ?2048;0$y
                                             i = j + 2
-                                        else:
-                                            i = j + 1
+                                            continue
+                                    elif terminator in b'R~':
+                                        # Cursor position or other response
+                                        i = j + 1
                                         continue
                                     elif terminator == b'<':
                                         # Mouse sequence, find M or m terminator
