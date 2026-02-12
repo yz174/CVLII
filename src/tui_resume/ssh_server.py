@@ -156,8 +156,8 @@ async def handle_client(process: SSHServerProcess) -> None:
                     # Subprocess provides bytes, SSH needs string
                     if isinstance(data, bytes):
                         data = data.decode('utf-8', errors='replace')
-                    # Send stderr to stdout so errors are visible
-                    process.stdout.write(f"[ERROR] {data}")
+                    # Send stderr directly without prefix (TUI might use stderr)
+                    process.stdout.write(data)
                     await process.stdout.drain()
             except Exception as e:
                 logger.debug(f"stderr pipe closed: {e}")
