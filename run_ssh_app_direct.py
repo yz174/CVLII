@@ -12,14 +12,27 @@ if 'TERM' not in os.environ:
 
 # Import and patch before creating the app
 from src.tui_resume.app import ResumeApp
-from textual.drivers.linux_driver import LinuxDriver
 
-# Monkey-patch LinuxDriver to disable mouse support
-original_enable_mouse = LinuxDriver._enable_mouse_support
-LinuxDriver._enable_mouse_support = lambda self: None
-
-original_disable_mouse = LinuxDriver._disable_mouse_support  
-LinuxDriver._disable_mouse_support = lambda self: None
+# Patch the LinuxDriver to disable mouse entirely
+try:
+    from textual.drivers.linux_driver import LinuxDriver
+    
+    # Store original methods
+    original_enable = LinuxDriver._enable_mouse_support
+    original_disable = LinuxDriver._disable_mouse_support
+    
+    # Replace with no-op functions
+    def noop_enable(self):
+        pass
+    
+    def noop_disable(self):
+        pass
+    
+    LinuxDriver._enable_mouse_support = noop_enable
+    LinuxDriver._disable_mouse_support = noop_disable
+    
+except Exception as e:
+    print(f"Warning: Could not patch LinuxDriver: {e}", file=sys.stderr)
 
 if __name__ == "__main__":
     try:

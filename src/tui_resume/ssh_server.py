@@ -114,40 +114,9 @@ async def handle_client(process: SSHServerProcess) -> None:
                             break
                         # SSH provides string, subprocess needs bytes
                         if isinstance(data, str):
-                            data_bytes = data.encode('utf-8')
-                        else:
-                            data_bytes = data
-                        
-                        # Only filter mouse tracking sequences, keep all other input
-                        # Mouse sequences start with ESC[< or ESC[M
-                        data_str = data_bytes.decode('utf-8', errors='ignore')
-                        filtered_parts = []
-                        i = 0
-                        while i < len(data_str):
-                            # Check for mouse sequences
-                            if i < len(data_str) - 2 and data_str[i:i+2] == '\x1b[':
-                                if i < len(data_str) - 3 and data_str[i+2] == '<':
-                                    # SGR mouse sequence - find end (M or m)
-                                    end = i + 3
-                                    while end < len(data_str) and data_str[end] not in 'Mm':
-                                        end += 1
-                                    if end < len(data_str):
-                                        i = end + 1  # Skip the mouse sequence
-                                        continue
-                                elif i < len(data_str) - 3 and data_str[i+2] == 'M':
-                                    # X10 mouse sequence - skip ESC[M and next 3 bytes
-                                    i += 6 if i + 6 <= len(data_str) else len(data_str)
-                                    continue
-                            
-                            # Not a mouse sequence, keep this character
-                            filtered_parts.append(data_str[i])
-                            i += 1
-                        
-                        filtered_data = ''.join(filtered_parts).encode('utf-8')
-                        
-                        if filtered_data:
-                            proc.stdin.write(filtered_data)
-                            await proc.stdin.drain()
+                            data = data.encode('utf-8')
+                        proc.stdin.write(data)
+                        await proc.stdin.drain()
                     except TerminalSizeChanged:
                         continue
                     except BreakReceived:
