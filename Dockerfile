@@ -19,6 +19,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application source code
 COPY src/ ./src/
 COPY logs/ ./logs/
+COPY run_ssh_app.py .
+COPY run_ssh_app_direct.py .
 
 # Create non-root user for security
 RUN addgroup --system appgroup && \
@@ -43,5 +45,5 @@ ENV TERM=xterm-256color
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import socket; s=socket.socket(); s.connect(('localhost', 2222)); s.close()"
 
-# Run the SSH server
-CMD ["python", "-m", "src.tui_resume.ssh_server"]
+# Run the SSH server (for production deployment)  
+CMD ["python", "-m", "src.tui_resume.ssh_server_inline"]
