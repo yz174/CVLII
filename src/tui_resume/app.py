@@ -90,10 +90,34 @@ class ResumeApp(App):
         
         scroll.mount(ProjectCard(
             title="Cloud Infrastructure Orchestrator",
-            description="Automated deployment pipeline for microservices architecture on AWS.",
-            tech_stack=["AWS", "Terraform", "Kubernetes", "Python"],
+            description="Automated deployment pipeline for microservices architecture on AWS. Implements Infrastructure as Code using Terraform and manages container orchestration with Kubernetes.",
+            tech_stack=["Terraform", "Kubernetes", "AWS", "Docker", "Python"],
             link="github.com/yourname/cloud-orchestrator"
         ))
+        
+        scroll.mount(ProjectCard(
+            title="Real-Time Analytics Dashboard",
+            description="High-performance dashboard for processing and visualizing streaming data. Handles millions of events per second with sub-second latency using event-driven architecture.",
+            tech_stack=["React", "Node.js", "Apache Kafka", "Redis", "PostgreSQL"],
+            link="github.com/yourname/analytics-dashboard"
+        ))
+        
+        scroll.mount(ProjectCard(
+            title="AI-Powered Code Review Bot",
+            description="Automated code review system that uses machine learning to identify bugs, security vulnerabilities, and code quality issues. Integrates with GitHub PRs and provides actionable feedback.",
+            tech_stack=["Python", "TensorFlow", "GitHub Actions", "FastAPI", "PostgreSQL"],
+            link="github.com/yourname/code-review-bot"
+        ))
+        
+        scroll.mount(ProjectCard(
+            title="Distributed Task Scheduler",
+            description="Scalable task scheduling system with distributed execution, fault tolerance, and real-time monitoring. Handles complex job dependencies and provides RESTful API for task management.",
+            tech_stack=["Go", "Redis", "RabbitMQ", "PostgreSQL", "Prometheus"],
+            link="github.com/yourname/task-scheduler"
+        ))
+        
+        # Focus first project card after mounting
+        self.call_after_refresh(self._focus_first_project)
     
     def _load_about(self, container: Container) -> None:
         """Load about content"""
@@ -169,6 +193,15 @@ Frameworks:
         if screen_id != self.current_screen_id:
             self.current_screen_id = screen_id
             self._load_content(screen_id)
+    
+    def _focus_first_project(self) -> None:
+        """Focus the first project card"""
+        try:
+            project_cards = self.query(ProjectCard)
+            if project_cards:
+                project_cards.first().focus()
+        except:
+            pass
 
 
 def main():
