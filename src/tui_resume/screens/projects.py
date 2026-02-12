@@ -27,39 +27,39 @@ class ProjectsScreen(Screen):
                 title="SSH TUI Resume",
                 description="An interactive terminal-based resume accessible via SSH. Built with Python, Textual framework, and AsyncSSH. Features animated backgrounds, mini-games, and smooth transitions.",
                 tech_stack=["Python", "Textual", "AsyncSSH", "Docker", "AWS EC2"],
-                link="github.com/yourname/tui-resume"
+                link="https://github.com/yz174/CVLII"
             )
             
             # Project 2
             yield ProjectCard(
-                title="Cloud Infrastructure Orchestrator",
-                description="Automated deployment pipeline for microservices architecture on AWS. Implements Infrastructure as Code using Terraform and manages container orchestration with Kubernetes.",
-                tech_stack=["Terraform", "Kubernetes", "AWS", "Docker", "Python"],
-                link="github.com/yourname/cloud-orchestrator"
+                title="Email Sync System",
+                description="An AI-powered email synchronization system that provides real-time IMAP email syncing, intelligent categorization, searchable storage, and AI-powered reply suggestions.",
+                tech_stack=["Typescript", "Node.js","React","Express", "RAG", "Docker", "BullMQ", "Redis", "Elasticsearch", "Gemini API", ],
+                link="https://github.com/yz174/email-sync-system"
             )
             
             # Project 3
             yield ProjectCard(
-                title="Real-Time Analytics Dashboard",
-                description="High-performance dashboard for processing and visualizing streaming data. Handles millions of events per second with sub-second latency using event-driven architecture.",
-                tech_stack=["React", "Node.js", "Apache Kafka", "Redis", "PostgreSQL"],
-                link="github.com/yourname/analytics-dashboard"
+                title="FreshXpress - A farmer's app",
+                description="A React Native mobile application built with Expo that provides farmers with essential tools for crop management and leaf disease detection using machine learning.",
+                tech_stack=["React Native", "Expo SDK 51", "TypeScript", "React Context API", "Supabase", "Weather API", " SMS Gateway", "MobileNetV2", "CUDA"],
+                link="https://github.com/yz174/farmer-management-system"
             )
             
             # Project 4
             yield ProjectCard(
-                title="AI-Powered Code Review Bot",
-                description="Automated code review system that uses machine learning to identify bugs, security vulnerabilities, and code quality issues. Integrates with GitHub PRs and provides actionable feedback.",
-                tech_stack=["Python", "TensorFlow", "GitHub Actions", "FastAPI", "PostgreSQL"],
-                link="github.com/yourname/code-review-bot"
+                title="Malware Detection and Analysis using Machine Learning",
+                description="Malware Detection and Analysis using Machine Learning WebApp is a robust tool designed to provide users with an intuitive interface for analyzing and detecting malware in various file formats.",
+                tech_stack=["Flask", "VirusTotalAPI", "Python", "requests"],
+                link="https://github.com/yz174/Malware-Detector"
             )
             
             # Project 5
             yield ProjectCard(
-                title="Distributed Task Scheduler",
-                description="Scalable task scheduling system with distributed execution, fault tolerance, and real-time monitoring. Handles complex job dependencies and provides RESTful API for task management.",
-                tech_stack=["Go", "Redis", "RabbitMQ", "PostgreSQL", "Prometheus"],
-                link="github.com/yourname/task-scheduler"
+                title="Link Saver & Auto Summary App",
+                description="A web application for saving bookmarks with automatic summary generation using Jina AI.",
+                tech_stack=["React", "Node.js", "Express", "Supabase", "JWT", "Jina AI"],
+                link="https://github.com/yz174/MetaMark"
             )
     
     def on_mount(self) -> None:

@@ -78,8 +78,7 @@ class WelcomeScreen(Screen):
     
     def _get_info_box(self) -> str:
         """Return info box content"""
-        return """[cyan]I am Ujjwal and this is my resume
-
+        return """[cyan]
 [bold]Patch notes:[/bold]
   • Added ascii art to the project
   • Updated the project section to show the latest projects i have been working on

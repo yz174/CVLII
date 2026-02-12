@@ -6,7 +6,7 @@ from textual.widgets import Header, Footer, Static
 from textual.containers import Container, VerticalScroll, Vertical, Grid
 from textual.message import Message
 
-from .widgets import NavBar, GenerativeBackground, ProjectCard
+from .widgets import NavBar, GenerativeBackground, ProjectCard, HomeGreeting
 from .screens import WelcomeScreen
 
 
@@ -67,7 +67,7 @@ class ResumeApp(App):
         
         # Mount new content based on screen
         if screen_id == "home":
-            container.mount(GenerativeBackground(animated=False))
+            container.mount(HomeGreeting())
         elif screen_id == "projects":
             self._load_projects(container)
         elif screen_id == "about":
@@ -89,35 +89,35 @@ class ResumeApp(App):
             title="SSH TUI Resume",
             description="An interactive terminal-based resume accessible via SSH. Built with Python, Textual framework, and AsyncSSH. Features animated backgrounds, mini-games, and smooth transitions.",
             tech_stack=["Python", "Textual", "AsyncSSH", "Docker", "AWS EC2"],
-            link="github.com/yourname/tui-resume"
+            link="https://github.com/yz174/CVLII"
         ))
         
         grid.mount(ProjectCard(
-            title="Cloud Infrastructure Orchestrator",
-            description="Automated deployment pipeline for microservices architecture on AWS. Implements Infrastructure as Code using Terraform and manages container orchestration with Kubernetes.",
-            tech_stack=["Terraform", "Kubernetes", "AWS", "Docker", "Python"],
-            link="github.com/yourname/cloud-orchestrator"
+            title="Email Sync System",
+            description="An AI-powered email synchronization system that provides real-time IMAP email syncing, intelligent categorization, searchable storage, and AI-powered reply suggestions.",
+            tech_stack=["Typescript", "Node.js", "React", "Express", "RAG", "Docker", "BullMQ", "Redis", "Elasticsearch", "Gemini API"],
+            link="https://github.com/yz174/email-sync-system"
         ))
         
         grid.mount(ProjectCard(
-            title="Real-Time Analytics Dashboard",
-            description="High-performance dashboard for processing and visualizing streaming data. Handles millions of events per second with sub-second latency using event-driven architecture.",
-            tech_stack=["React", "Node.js", "Apache Kafka", "Redis", "PostgreSQL"],
-            link="github.com/yourname/analytics-dashboard"
+            title="FreshXpress - A farmer's app",
+            description="A React Native mobile application built with Expo that provides farmers with essential tools for crop management and leaf disease detection using machine learning.",
+            tech_stack=["React Native", "Expo SDK 51", "TypeScript", "React Context API", "Supabase", "Weather API", "SMS Gateway", "MobileNetV2", "CUDA"],
+            link="https://github.com/yz174/farmer-management-system"
         ))
         
         grid.mount(ProjectCard(
-            title="AI-Powered Code Review Bot",
-            description="Automated code review system that uses machine learning to identify bugs, security vulnerabilities, and code quality issues. Integrates with GitHub PRs and provides actionable feedback.",
-            tech_stack=["Python", "TensorFlow", "GitHub Actions", "FastAPI", "PostgreSQL"],
-            link="github.com/yourname/code-review-bot"
+            title="Malware Detection and Analysis using Machine Learning",
+            description="Malware Detection and Analysis using Machine Learning WebApp is a robust tool designed to provide users with an intuitive interface for analyzing and detecting malware in various file formats.",
+            tech_stack=["Flask", "VirusTotalAPI", "Python", "requests"],
+            link="https://github.com/yz174/Malware-Detector"
         ))
         
         grid.mount(ProjectCard(
-            title="Distributed Task Scheduler",
-            description="Scalable task scheduling system with distributed execution, fault tolerance, and real-time monitoring. Handles complex job dependencies and provides RESTful API for task management.",
-            tech_stack=["Go", "Redis", "RabbitMQ", "PostgreSQL", "Prometheus"],
-            link="github.com/yourname/task-scheduler"
+            title="Link Saver & Auto Summary App",
+            description="A web application for saving bookmarks with automatic summary generation using Jina AI.",
+            tech_stack=["React", "Node.js", "Express", "Supabase", "JWT", "Jina AI"],
+            link="https://github.com/yz174/MetaMark"
         ))
         
         # Focus first project card after mounting
@@ -130,31 +130,37 @@ class ResumeApp(App):
         
         bio_section.mount(Static("[bold cyan]ABOUT ME[/bold cyan]\n", classes="section-title"))
         bio_section.mount(Static("""
-Professional full-stack developer with expertise in cloud architecture 
-and terminal-based applications. Passionate about creating innovative 
-developer tools and automation solutions.
+Junior full-stack developer with expertise in Full Stack 
+Web and Mobile development. Passionate about breaking things 
+and building developer tools and automation solutions.
 
 Experience:
-  • 5+ years in software development
-  • Cloud architecture on AWS, Azure, GCP
-  • Python, TypeScript, Go
+  • 1+ years in software development
+  • Cloud architecture on AWS
+  • Python, TypeScript, Javascript
   • DevOps and CI/CD pipelines
 
 Education:
-  • Computer Science degree
-  • Multiple cloud certifications
+  • B.tech in Computer Science from Bennett University (2023-2027) • 8.33 CGPA 
+  • Multiple cloud and AI certifications
         """))
         
         bio_section.mount(Static("\n[bold cyan]SKILLS[/bold cyan]\n"))
         bio_section.mount(Static("""
 Programming:
-  Python • TypeScript • Go • Rust • Java
+  [#E0E0E0]Python • C++ • Javascript • TypeScript • TailwindCSS[/#E0E0E0]
 
 Cloud & DevOps:
-  AWS • Docker • Kubernetes • Terraform • CI/CD
+  [#5F87AF]AWS • Docker • CI/CD[/#5F87AF]
 
 Frameworks:
-  Textual • React • Node.js • FastAPI
+  [#87AF87]React Native • Expo • React • Next.js • Node.js • FastAPI • Express.js • FastAPI • Flask • Textual[/#87AF87]
+
+Databases:
+  [#AF875F]PostgreSQL • MySQL • MongoDB • Redis[/#AF875F]
+
+Other:
+  [#808080]N8N • Make[/#808080]   
         """))
     
     def on_nav_bar_tab_selected(self, message: "NavBar.TabSelected") -> None:
