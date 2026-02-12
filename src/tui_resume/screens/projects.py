@@ -4,11 +4,17 @@ from textual.screen import Screen
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import Static
+from textual.binding import Binding
 from ..widgets import ProjectCard, MatrixText
 
 
 class ProjectsScreen(Screen):
     """Screen displaying project portfolio"""
+    
+    BINDINGS = [
+        Binding("up", "focus_previous", "Previous Project", show=False),
+        Binding("down", "focus_next", "Next Project", show=False),
+    ]
     
     def compose(self) -> ComposeResult:
         """Create child widgets"""
@@ -47,7 +53,18 @@ class ProjectsScreen(Screen):
                 tech_stack=["Python", "TensorFlow", "GitHub Actions", "FastAPI", "PostgreSQL"],
                 link="github.com/yourname/code-review-bot"
             )
+            
+            # Project 5
+            yield ProjectCard(
+                title="Distributed Task Scheduler",
+                description="Scalable task scheduling system with distributed execution, fault tolerance, and real-time monitoring. Handles complex job dependencies and provides RESTful API for task management.",
+                tech_stack=["Go", "Redis", "RabbitMQ", "PostgreSQL", "Prometheus"],
+                link="github.com/yourname/task-scheduler"
+            )
     
     def on_mount(self) -> None:
         """Called when screen is mounted"""
-        pass
+        # Focus the first project card
+        project_cards = self.query(ProjectCard)
+        if project_cards:
+            project_cards.first().focus()

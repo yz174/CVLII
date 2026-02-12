@@ -1,14 +1,18 @@
 """Project card widget for displaying project information"""
 
+import webbrowser
 from textual.widget import Widget
 from textual.containers import Container
 from textual.widgets import Static, Label
+from textual.message import Message
 from rich.text import Text
 from rich.panel import Panel
 
 
 class ProjectCard(Widget):
     """Card widget for displaying a single project"""
+    
+    can_focus = True
     
     DEFAULT_CSS = """
     ProjectCard {
@@ -22,6 +26,11 @@ class ProjectCard(Widget):
     
     ProjectCard:hover {
         border: heavy $success;
+    }
+    
+    ProjectCard:focus {
+        border: heavy $accent;
+        background: $surface;
     }
     
     ProjectCard .project-title {
@@ -57,6 +66,29 @@ class ProjectCard(Widget):
         self.description = description
         self.tech_stack = tech_stack
         self.link = link
+    
+    async def on_key(self, event) -> None:
+        """Handle key press events"""
+        if event.key == "enter" and self.link:
+            # Open the GitHub link in default browser
+            full_link = self.link if self.link.startswith("http") else f"https://{self.link}"
+            webbrowser.open(full_link)
+        elif event.key == "down":
+            # Move to next project card
+            event.stop()
+            event.prevent_default()
+            self.screen.focus_next()
+            # Scroll the focused widget into view
+            if self.screen.focused:
+                self.screen.focused.scroll_visible()
+        elif event.key == "up":
+            # Move to previous project card
+            event.stop()
+            event.prevent_default()
+            self.screen.focus_previous()
+            # Scroll the focused widget into view
+            if self.screen.focused:
+                self.screen.focused.scroll_visible()
     
     def render(self) -> Text:
         """Render the project card"""
