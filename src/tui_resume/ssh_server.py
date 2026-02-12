@@ -114,20 +114,39 @@ async def handle_client(process: SSHServerProcess) -> None:
                             break
                         # SSH provides string, subprocess needs bytes
                         if isinstance(data, str):
-                            data = data.encode('utf-8')
+                            data_bytes = data.encode('utf-8')
+                        else:
+                            data_bytes = data
                         
-                        # Filter out mouse tracking escape sequences
-                        # Mouse sequences: ESC[<...M/m or ESC[M...
-                        import re
-                        data_str = data.decode('utf-8', errors='ignore')
-                        # Remove SGR mouse tracking sequences (\x1b[<...M or \x1b[<...m)
-                        data_str = re.sub(r'\x1b\[<[0-9;]+[Mm]', '', data_str)
-                        # Remove X10/normal mouse tracking (\x1b\[M followed by 3 bytes)
-                        data_str = re.sub(r'\x1b\[M...', '', data_str)
-                        data = data_str.encode('utf-8')
+                        # Only filter mouse tracking sequences, keep all other input
+                        # Mouse sequences start with ESC[< or ESC[M
+                        data_str = data_bytes.decode('utf-8', errors='ignore')
+                        filtered_parts = []
+                        i = 0
+                        while i < len(data_str):
+                            # Check for mouse sequences
+                            if i < len(data_str) - 2 and data_str[i:i+2] == '\x1b[':
+                                if i < len(data_str) - 3 and data_str[i+2] == '<':
+                                    # SGR mouse sequence - find end (M or m)
+                                    end = i + 3
+                                    while end < len(data_str) and data_str[end] not in 'Mm':
+                                        end += 1
+                                    if end < len(data_str):
+                                        i = end + 1  # Skip the mouse sequence
+                                        continue
+                                elif i < len(data_str) - 3 and data_str[i+2] == 'M':
+                                    # X10 mouse sequence - skip ESC[M and next 3 bytes
+                                    i += 6 if i + 6 <= len(data_str) else len(data_str)
+                                    continue
+                            
+                            # Not a mouse sequence, keep this character
+                            filtered_parts.append(data_str[i])
+                            i += 1
                         
-                        if data:  # Only write if there's data left after filtering
-                            proc.stdin.write(data)
+                        filtered_data = ''.join(filtered_parts).encode('utf-8')
+                        
+                        if filtered_data:
+                            proc.stdin.write(filtered_data)
                             await proc.stdin.drain()
                     except TerminalSizeChanged:
                         continue
