@@ -77,18 +77,28 @@ class ProjectCard(Widget):
             # Move to next project card
             event.stop()
             event.prevent_default()
-            self.screen.focus_next()
-            # Scroll the focused widget into view
-            if self.screen.focused:
-                self.screen.focused.scroll_visible()
+            
+            # Get all project cards
+            project_cards = self.screen.query(ProjectCard)
+            current_index = list(project_cards).index(self)
+            
+            # Only move if not on the last project
+            if current_index < len(project_cards) - 1:
+                project_cards[current_index + 1].focus()
+                project_cards[current_index + 1].scroll_visible()
         elif event.key == "up":
             # Move to previous project card
             event.stop()
             event.prevent_default()
-            self.screen.focus_previous()
-            # Scroll the focused widget into view
-            if self.screen.focused:
-                self.screen.focused.scroll_visible()
+            
+            # Get all project cards
+            project_cards = self.screen.query(ProjectCard)
+            current_index = list(project_cards).index(self)
+            
+            # Only move if not on the first project
+            if current_index > 0:
+                project_cards[current_index - 1].focus()
+                project_cards[current_index - 1].scroll_visible()
     
     def render(self) -> Text:
         """Render the project card"""
