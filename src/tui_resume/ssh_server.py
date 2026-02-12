@@ -115,8 +115,20 @@ async def handle_client(process: SSHServerProcess) -> None:
                         # SSH provides string, subprocess needs bytes
                         if isinstance(data, str):
                             data = data.encode('utf-8')
-                        proc.stdin.write(data)
-                        await proc.stdin.drain()
+                        
+                        # Filter out mouse tracking escape sequences
+                        # Mouse sequences: ESC[<...M/m or ESC[M...
+                        import re
+                        data_str = data.decode('utf-8', errors='ignore')
+                        # Remove SGR mouse tracking sequences (\x1b[<...M or \x1b[<...m)
+                        data_str = re.sub(r'\x1b\[<[0-9;]+[Mm]', '', data_str)
+                        # Remove X10/normal mouse tracking (\x1b\[M followed by 3 bytes)
+                        data_str = re.sub(r'\x1b\[M...', '', data_str)
+                        data = data_str.encode('utf-8')
+                        
+                        if data:  # Only write if there's data left after filtering
+                            proc.stdin.write(data)
+                            await proc.stdin.drain()
                     except TerminalSizeChanged:
                         continue
                     except BreakReceived:
