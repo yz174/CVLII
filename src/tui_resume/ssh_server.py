@@ -77,52 +77,75 @@ async def handle_client(process: SSHServerProcess) -> None:
         
         logger.info(f"Terminal: {term_type}, Size: {width}x{height}")
         
-        # Set environment variables for subprocess
+        # Import pty for pseudo-terminal support
         import os
+        import pty
+        import fcntl
+        import struct
+        import termios
+        
+        # Create a pseudo-terminal
+        master_fd, slave_fd = pty.openpty()
+        
+        # Set terminal size on the PTY
+        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack('HHHH', height, width, 0, 0))
+        
+        # Set environment variables for subprocess
         env = os.environ.copy()
         env['TERM'] = term_type or 'xterm-256color'
         env['COLUMNS'] = str(width)
         env['LINES'] = str(height)
         env['PYTHONUNBUFFERED'] = '1'
         
-        # Try using shell=True to get proper terminal handling
-        # Create a command that runs Python with the wrapper
-        import platform
-        if platform.system() == 'Windows':
-            # Use the wrapper script
-            cmd = f'{sys.executable} run_ssh_app.py'
-        else:
-            cmd = f'{sys.executable} run_ssh_app.py'
+        # Create command to run the app
+        cmd = f'{sys.executable} run_ssh_app.py'
         
-        logger.info(f"Starting subprocess: {cmd}")
+        logger.info(f"Starting subprocess with PTY: {cmd}")
         logger.info(f"Working directory: {os.getcwd()}")
         
+        # Create subprocess connected to PTY slave
         proc = await asyncio.create_subprocess_shell(
             cmd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
             env=env,
             cwd=os.getcwd()
         )
         
+        # Close slave fd in parent process (child still has it)
+        os.close(slave_fd)
+        # Close slave fd in parent process (child still has it)
+        os.close(slave_fd)
+        
         logger.info(f"Subprocess started with PID: {proc.pid}")
         
-        # Create tasks to bridge SSH streams and subprocess pipes
+        # Set master_fd to non-blocking mode
+        os.set_blocking(master_fd, False)
+        
+        # Create tasks to bridge SSH streams and PTY master
         async def pipe_stdin():
-            """Copy data from SSH client to subprocess stdin"""
+            """Copy data from SSH client to PTY master (subprocess stdin)"""
             try:
                 while True:
                     try:
-                        data = await process.stdin.read(1)  # Read byte by byte for responsiveness
+                        data = await process.stdin.read(4096)
                         if not data:
                             break
-                        # SSH provides string, subprocess needs bytes
+                        # SSH provides string, PTY needs bytes
                         if isinstance(data, str):
                             data = data.encode('utf-8')
-                        proc.stdin.write(data)
-                        await proc.stdin.drain()
-                    except TerminalSizeChanged:
+                        
+                        # Write to PTY master (non-blocking)
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(None, os.write, master_fd, data)
+                        
+                    except TerminalSizeChanged as size_change:
+                        # Handle terminal resize
+                        new_width, new_height = size_change.width, size_change.height
+                        logger.info(f"Terminal resized to {new_width}x{new_height}")
+                        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, 
+                                  struct.pack('HHHH', new_height, new_width, 0, 0))
                         continue
                     except BreakReceived:
                         continue
@@ -130,53 +153,50 @@ async def handle_client(process: SSHServerProcess) -> None:
                 logger.debug(f"stdin pipe closed: {e}")
             finally:
                 try:
-                    if proc.stdin and not proc.stdin.is_closing():
-                        proc.stdin.close()
-                        await proc.stdin.wait_closed()
+                    os.close(master_fd)
                 except:
                     pass
         
         async def pipe_stdout():
-            """Copy data from subprocess stdout to SSH client"""
+            """Copy data from PTY master (subprocess stdout) to SSH client"""
             try:
+                loop = asyncio.get_event_loop()
                 while True:
-                    data = await proc.stdout.read(8192)
-                    if not data:
+                    try:
+                        # Read from PTY master (non-blocking)
+                        data = await loop.run_in_executor(None, os.read, master_fd, 8192)
+                        if not data:
+                            break
+                        # PTY provides bytes, SSH needs string
+                        if isinstance(data, bytes):
+                            data = data.decode('utf-8', errors='replace')
+                        process.stdout.write(data)
+                        await process.stdout.drain()
+                    except BlockingIOError:
+                        # No data available, sleep briefly
+                        await asyncio.sleep(0.01)
+                        continue
+                    except OSError:
+                        # PTY closed
                         break
-                    # Subprocess provides bytes, SSH needs string
-                    if isinstance(data, bytes):
-                        data = data.decode('utf-8', errors='replace')
-                    process.stdout.write(data)
-                    await process.stdout.drain()
             except Exception as e:
                 logger.debug(f"stdout pipe closed: {e}")
         
-        async def pipe_stderr():
-            """Copy data from subprocess stderr to SSH client"""
-            try:
-                while True:
-                    data = await proc.stderr.read(8192)
-                    if not data:
-                        break
-                    # Subprocess provides bytes, SSH needs string
-                    if isinstance(data, bytes):
-                        data = data.decode('utf-8', errors='replace')
-                    # Send stderr to stdout so errors are visible
-                    process.stdout.write(f"[ERROR] {data}")
-                    await process.stdout.drain()
-            except Exception as e:
-                logger.debug(f"stderr pipe closed: {e}")
-        
-        # Run all pipes concurrently and wait for process to finish
+        # Run both pipes concurrently and wait for process to finish
         try:
             await asyncio.gather(
                 pipe_stdin(),
                 pipe_stdout(),
-                pipe_stderr(),
                 proc.wait(),
                 return_exceptions=True
             )
         finally:
+            # Ensure PTY master is closed
+            try:
+                os.close(master_fd)
+            except:
+                pass
+                
             # Ensure subprocess is terminated
             if proc.returncode is None:
                 try:
