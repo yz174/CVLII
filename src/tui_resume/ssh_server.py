@@ -107,6 +107,7 @@ async def handle_client(process: SSHServerProcess) -> None:
         async def pipe_stdin():
             """Copy data from SSH client to subprocess stdin"""
             try:
+                buffer = b""
                 while True:
                     try:
                         data = await process.stdin.read(4096)
@@ -115,8 +116,52 @@ async def handle_client(process: SSHServerProcess) -> None:
                         # SSH provides string, subprocess needs bytes
                         if isinstance(data, str):
                             data = data.encode('utf-8')
-                        proc.stdin.write(data)
-                        await proc.stdin.drain()
+                        
+                        # Add to buffer for processing
+                        buffer += data
+                        
+                        # Filter out terminal query responses (CSI responses)
+                        # These include: cursor position reports, device attributes, etc.
+                        # Pattern: ESC [ digits ; digits $ followed by letter or ESC [ digits ; digits R
+                        filtered = b""
+                        i = 0
+                        while i < len(buffer):
+                            # Check for escape sequence responses
+                            if i < len(buffer) - 1 and buffer[i:i+1] == b'\x1b' and i+1 < len(buffer) and buffer[i+1:i+2] == b'[':
+                                # This is a CSI sequence, check if it's a response
+                                j = i + 2
+                                # Skip digits, semicolons
+                                while j < len(buffer) and buffer[j:j+1] in b'0123456789;':
+                                    j += 1
+                                # Check for response terminators: $ followed by letter, or R, or ~ etc.
+                                if j < len(buffer):
+                                    terminator = buffer[j:j+1]
+                                    if terminator in b'R$~':
+                                        # This is a response, skip it
+                                        if terminator == b'$' and j+1 < len(buffer):
+                                            # Skip the letter after $
+                                            i = j + 2
+                                        else:
+                                            i = j + 1
+                                        continue
+                                    elif terminator == b'<':
+                                        # Mouse sequence, find M or m terminator
+                                        while j < len(buffer) and buffer[j:j+1] not in b'Mm':
+                                            j += 1
+                                        if j < len(buffer):
+                                            i = j + 1
+                                            continue
+                            
+                            # Not a response sequence, keep this byte
+                            filtered += buffer[i:i+1]
+                            i += 1
+                        
+                        # Replace buffer with unprocessed data (in case of incomplete sequences)
+                        buffer = b""
+                        
+                        if filtered:
+                            proc.stdin.write(filtered)
+                            await proc.stdin.drain()
                     except TerminalSizeChanged:
                         continue
                     except BreakReceived:
