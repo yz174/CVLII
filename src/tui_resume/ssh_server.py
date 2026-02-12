@@ -129,47 +129,66 @@ async def handle_client(process: SSHServerProcess) -> None:
                         # - ESC[<...M or ESC[<...m (mouse sequences)
                         filtered = b""
                         i = 0
+                        last_complete = 0  # Track last byte we fully processed
+                        
                         while i < len(buffer):
                             # Check for escape sequence responses
-                            if i < len(buffer) - 1 and buffer[i:i+1] == b'\x1b' and i+1 < len(buffer) and buffer[i+1:i+2] == b'[':
-                                # This is a CSI sequence, check if it's a response
-                                j = i + 2
-                                
-                                # Check for optional ? or > after [
-                                if j < len(buffer) and buffer[j:j+1] in b'?>':
-                                    j += 1
-                                
-                                # Skip digits, semicolons
-                                while j < len(buffer) and buffer[j:j+1] in b'0123456789;':
-                                    j += 1
-                                
-                                # Check for response terminators: $ followed by letter, or R, or ~ etc.
-                                if j < len(buffer):
+                            if buffer[i:i+1] == b'\x1b':
+                                if i+1 >= len(buffer):
+                                    # Incomplete ESC sequence, keep in buffer
+                                    break
+                                if buffer[i+1:i+2] == b'[':
+                                    # This is a CSI sequence, check if it's a response
+                                    j = i + 2
+                                    
+                                    # Check for optional ? or > after [
+                                    if j < len(buffer) and buffer[j:j+1] in b'?>':
+                                        j += 1
+                                    
+                                    # Skip digits, semicolons
+                                    while j < len(buffer) and buffer[j:j+1] in b'0123456789;':
+                                        j += 1
+                                    
+                                    # Need terminator to complete the sequence
+                                    if j >= len(buffer):
+                                        # Incomplete sequence, keep in buffer
+                                        break
+                                    
+                                    # Check for response terminators
                                     terminator = buffer[j:j+1]
                                     if terminator == b'$':
-                                        # Mode report: skip $ and the following letter
-                                        if j+1 < len(buffer):
-                                            # This is a response like ?2048;0$y
-                                            i = j + 2
-                                            continue
+                                        # Mode report: need one more byte (the letter)
+                                        if j+1 >= len(buffer):
+                                            # Incomplete, keep in buffer
+                                            break
+                                        # Complete response like ?2048;0$y - skip it
+                                        i = j + 2
+                                        last_complete = i
+                                        continue
                                     elif terminator in b'R~':
-                                        # Cursor position or other response
+                                        # Complete cursor position or other response - skip it
                                         i = j + 1
+                                        last_complete = i
                                         continue
                                     elif terminator == b'<':
                                         # Mouse sequence, find M or m terminator
                                         while j < len(buffer) and buffer[j:j+1] not in b'Mm':
                                             j += 1
-                                        if j < len(buffer):
-                                            i = j + 1
-                                            continue
+                                        if j >= len(buffer):
+                                            # Incomplete, keep in buffer
+                                            break
+                                        # Complete mouse sequence - skip it
+                                        i = j + 1
+                                        last_complete = i
+                                        continue
                             
                             # Not a response sequence, keep this byte
                             filtered += buffer[i:i+1]
                             i += 1
+                            last_complete = i
                         
-                        # Replace buffer with unprocessed data (in case of incomplete sequences)
-                        buffer = b""
+                        # Keep incomplete sequences in buffer for next iteration
+                        buffer = buffer[last_complete:]
                         
                         if filtered:
                             proc.stdin.write(filtered)
