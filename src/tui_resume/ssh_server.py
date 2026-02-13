@@ -9,11 +9,16 @@ import subprocess
 import fcntl
 import termios
 import struct
+import re
 from pathlib import Path
 from typing import Optional
 
 import asyncssh
 from asyncssh import SSHServerProcess, SSHServerConnection, SSHServerSession, TerminalSizeChanged, BreakReceived
+
+# Regex to filter terminal reply sequences from PTY output
+# Matches sequences like ESC[?2048;0$y (mode reports) and ESC[?2026$y (device attributes)
+ANSI_REPLY_RE = re.compile(rb'\x1b\[\?\d+(?:;\d+)*\$[a-zA-Z]')
 
 
 # Configure logging
@@ -155,7 +160,7 @@ async def handle_client(process: SSHServerProcess) -> None:
         
         # ---- PTY master → SSH client ----
         async def pty_to_ssh():
-            """Read from PTY master and send to SSH client"""
+            """Read from PTY master and send to SSH client, filtering terminal replies"""
             try:
                 while True:
                     # Use executor for blocking os.read
@@ -164,6 +169,11 @@ async def handle_client(process: SSHServerProcess) -> None:
                     )
                     if not data:
                         break
+                    
+                    # ---- FILTER TERMINAL REPLY SEQUENCES ----
+                    # Remove terminal mode reports like ESC[?2048;0$y that appear as artifacts
+                    # These are responses to terminal capability queries from the SSH client
+                    data = ANSI_REPLY_RE.sub(b'', data)
                     
                     # Decode and send to SSH client
                     process.stdout.write(
