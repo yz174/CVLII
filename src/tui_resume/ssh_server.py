@@ -5,6 +5,7 @@ import sys
 import logging
 import os
 import pty
+import tty
 import subprocess
 import fcntl
 import termios
@@ -120,6 +121,11 @@ async def handle_client(process: SSHServerProcess) -> None:
         # This creates a pseudo-terminal pair (master/slave)
         # The slave acts like a real terminal device for the TUI app
         master_fd, slave_fd = pty.openpty()
+        
+        # ---- CRITICAL: Set PTY to RAW mode ----
+        # This disables line buffering and allows immediate keyboard input
+        # Without this, Textual won't receive keypresses until Enter is pressed
+        tty.setraw(slave_fd)
         
         # NOW set PTY size to match SSH client terminal
         def set_pty_size(fd, cols, rows):
