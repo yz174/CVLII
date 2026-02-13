@@ -76,30 +76,38 @@ class ResumeSSHServer(asyncssh.SSHServer):
 
 
 class ResumeSSHSession(asyncssh.SSHServerSession):
-    """SSH Session handler that accepts PTY requests"""
+    """SSH Session handler that accepts PTY requests and manages TUI lifecycle"""
     
     def __init__(self):
-        self._process = None
-        self.master_fd = None  # Will be set by handle_client
+        self.master_fd = None
+        self.proc = None
+        self.loop = None
+        self.term_type = None
+        self.cols = 80
+        self.rows = 24
     
     def connection_made(self, chan):
         """Called when session connection is established"""
-        self._chan = chan
-        chan.session = self  # ⭐ Attach session to channel for access from process
+        self.chan = chan
+        self.loop = asyncio.get_event_loop()
+        logger.debug("Session connection established")
     
     def pty_requested(self, term_type, term_size, term_modes):
         """Accept PTY request from client - critical for proper terminal behavior"""
         logger.debug(f"PTY requested: {term_type}, size: {term_size}")
         # ⭐ CRITICAL: Set raw mode DURING PTY negotiation for Windows compatibility
-        # Windows SSH clients lock input mode at PTY allocation time
-        # Linux/macOS renegotiate automatically, Windows does not
-        self._chan.set_line_mode(False)  # Disable canonical input (line buffering)
-        self._chan.set_echo(False)       # Disable server-side echo
+        self.chan.set_line_mode(False)  # Disable canonical input (line buffering)
+        self.chan.set_echo(False)       # Disable server-side echo
+        
+        # Store terminal info for PTY setup
+        self.term_type = term_type or "xterm-256color"
+        self.cols, self.rows = term_size or (80, 24)
         return True
     
     def shell_requested(self):
-        """Accept shell request - our TUI is the shell"""
-        logger.debug("Shell requested")
+        """Accept shell request - launch TUI asynchronously"""
+        logger.debug("Shell requested - launching TUI")
+        asyncio.create_task(self.start_tui())
         return True
     
     def exec_requested(self, command):
@@ -107,153 +115,92 @@ class ResumeSSHSession(asyncssh.SSHServerSession):
         logger.debug(f"Exec command rejected: {command}")
         return False
     
+    async def start_tui(self):
+        """⭐ Launch the TUI application in a PTY - session owns the entire lifecycle"""
+        try:
+            logger.info(f"Starting TUI: Terminal={self.term_type}, Size={self.cols}x{self.rows}")
+            
+            # Environment variables
+            env = os.environ.copy()
+            env["TERM"] = self.term_type
+            env["COLUMNS"] = str(self.cols)
+            env["LINES"] = str(self.rows)
+            env["PYTHONUNBUFFERED"] = "1"
+            
+            # Create PTY
+            self.master_fd, slave_fd = pty.openpty()
+            tty.setraw(slave_fd)
+            
+            # Set PTY size
+            fcntl.ioctl(
+                self.master_fd,
+                termios.TIOCSWINSZ,
+                struct.pack("HHHH", self.rows, self.cols, 0, 0),
+            )
+            
+            # Launch TUI subprocess
+            self.proc = subprocess.Popen(
+                [sys.executable, "-u", "run_ssh_app_direct.py"],
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                env=env,
+                cwd=os.getcwd(),
+                preexec_fn=os.setsid,
+                close_fds=True,
+            )
+            
+            logger.info(f"TUI subprocess started with PID: {self.proc.pid}")
+            os.close(slave_fd)
+            
+            # Start output forwarding
+            await self.pty_to_client()
+            
+        except Exception as e:
+            logger.error(f"Error starting TUI: {e}", exc_info=True)
+            self.chan.exit(1)
+    
+    async def pty_to_client(self):
+        """Forward PTY output to SSH client with filtering"""
+        try:
+            while True:
+                data = await self.loop.run_in_executor(
+                    None, os.read, self.master_fd, 8192
+                )
+                if not data:
+                    break
+                
+                # Filter terminal reply sequences
+                data = ANSI_REPLY_RE.sub(b'', data)
+                
+                # Send to client
+                self.chan.write(data.decode("utf-8", errors="replace"))
+                
+        except Exception as e:
+            logger.debug(f"PTY output closed: {e}")
+        finally:
+            # Cleanup
+            if self.master_fd:
+                try:
+                    os.close(self.master_fd)
+                except:
+                    pass
+            if self.proc:
+                self.proc.wait()
+                logger.info(f"TUI process exited with code: {self.proc.returncode}")
+            self.chan.exit(0)
+    
     def data_received(self, data, datatype):
         """⭐ CRITICAL: Direct keyboard input routing for Windows compatibility
-        Windows OpenSSH sends keyboard input as SSH channel data packets
-        that don't reach process.stdin.read() in custom PTY configurations.
+        Windows OpenSSH sends keyboard input as SSH channel data packets.
         This callback receives ALL client input regardless of OS."""
         if self.master_fd is not None:
             try:
-                # Ensure data is bytes
                 if isinstance(data, str):
                     data = data.encode('utf-8')
-                # Write directly to PTY master (blocking operation)
                 os.write(self.master_fd, data)
             except OSError as e:
                 logger.debug(f"Failed to write to PTY: {e}")
-
-
-async def handle_client(process: SSHServerProcess) -> None:
-    """Handle SSH client by running the TUI application in a PTY"""
-    logger.info("Starting PTY-backed TUI session")
-    
-    try:
-        # Get terminal information FIRST
-        term_type = process.get_terminal_type() or "xterm-256color"
-        term_size = process.get_terminal_size()
-        
-        cols = term_size[0] if term_size else 80
-        rows = term_size[1] if term_size else 24
-        
-        logger.info(f"Terminal: {term_type}, Size: {cols}x{rows}")
-        
-        # Set environment variables for subprocess
-        env = os.environ.copy()
-        env["TERM"] = term_type
-        env["COLUMNS"] = str(cols)
-        env["LINES"] = str(rows)
-        env["PYTHONUNBUFFERED"] = "1"
-        
-        # ---- CREATE PTY ----
-        # This creates a pseudo-terminal pair (master/slave)
-        # The slave acts like a real terminal device for the TUI app
-        master_fd, slave_fd = pty.openpty()
-        
-        # ⭐ CRITICAL: Connect PTY to session for direct input routing
-        # Windows SSH clients send input via data_received() callback, not stdin
-        session = process.channel.session
-        if session is not None:
-            session.master_fd = master_fd
-        
-        # ---- CRITICAL: Set PTY to RAW mode ----
-        # This disables line buffering and allows immediate keyboard input
-        # Without this, Textual won't receive keypresses until Enter is pressed
-        tty.setraw(slave_fd)
-        
-        # NOW set PTY size to match SSH client terminal
-        def set_pty_size(fd, cols, rows):
-            """Set the terminal size for the PTY"""
-            fcntl.ioctl(
-                fd,
-                termios.TIOCSWINSZ,
-                struct.pack("HHHH", rows, cols, 0, 0)
-            )
-        
-        set_pty_size(master_fd, cols, rows)
-        
-        # Command to run the TUI app
-        cmd = [sys.executable, "-u", "run_ssh_app_direct.py"]
-        
-        logger.info(f"Starting subprocess in PTY: {' '.join(cmd)}")
-        logger.info(f"Working directory: {os.getcwd()}")
-        
-        # Spawn subprocess attached to the slave side of the PTY
-        # This gives Textual a real terminal device (/dev/pts/X)
-        proc = subprocess.Popen(
-            cmd,
-            stdin=slave_fd,
-            stdout=slave_fd,
-            stderr=slave_fd,
-            env=env,
-            cwd=os.getcwd(),
-            preexec_fn=os.setsid,  # Create new session
-            close_fds=True,
-        )
-        
-        logger.info(f"Subprocess started with PID: {proc.pid}")
-        
-        # Close slave fd in parent (only child uses it)
-        os.close(slave_fd)
-        
-        loop = asyncio.get_running_loop()
-        
-        # ---- PTY master → SSH client ----
-        async def pty_to_ssh():
-            """Read from PTY master and send to SSH client, filtering terminal replies"""
-            try:
-                while True:
-                    # Use executor for blocking os.read
-                    data = await loop.run_in_executor(
-                        None, os.read, master_fd, 8192
-                    )
-                    if not data:
-                        break
-                    
-                    # ---- FILTER TERMINAL REPLY SEQUENCES ----
-                    # Remove terminal mode reports like ESC[?2048;0$y that appear as artifacts
-                    # These are responses to terminal capability queries from the SSH client
-                    data = ANSI_REPLY_RE.sub(b'', data)
-                    
-                    # Decode and send to SSH client
-                    process.stdout.write(
-                        data.decode("utf-8", errors="replace")
-                    )
-                    await process.stdout.drain()
-            except Exception as e:
-                logger.debug(f"pty_to_ssh closed: {e}")
-        
-        # ⭐ NOTE: SSH input now handled by session.data_received() callback
-        # This fixes Windows compatibility where process.stdin.read() misses
-        # keyboard input sent as SSH extended data packets
-        
-        # Run all tasks concurrently
-        await asyncio.gather(
-            pty_to_ssh(),
-            loop.run_in_executor(None, proc.wait),
-            return_exceptions=True,
-        )
-        
-        logger.info(f"TUI application exited with code {proc.returncode}")
-        
-    except Exception as e:
-        logger.error(f"Error running TUI app: {e}", exc_info=True)
-        try:
-            process.stderr.write(f"Error: {e}\n")
-        except:
-            pass
-    finally:
-        # Clean up PTY
-        try:
-            os.close(master_fd)
-        except:
-            pass
-        
-        # Exit SSH session
-        try:
-            if not process.channel.is_closing():
-                process.exit(0)
-        except:
-            pass
 
 
 async def start_server(host: str = '', port: int = 2222, host_key: str = 'host_key'):
@@ -278,9 +225,8 @@ async def start_server(host: str = '', port: int = 2222, host_key: str = 'host_k
             port,
             server_host_keys=[host_key],
             server_factory=ResumeSSHServer,
-            process_factory=handle_client,
-            session_factory=ResumeSSHSession,  # Critical: Accept PTY requests
-            line_editor=False,  # CRITICAL: Disable line editor for raw terminal mode (TUI needs immediate key forwarding)
+            session_factory=ResumeSSHSession,  # ⭐ Pure session-driven architecture
+            line_editor=False,  # CRITICAL: Disable line editor for raw terminal mode
             # Disable other SSH features for security
             sftp_factory=None,
             allow_scp=False,
