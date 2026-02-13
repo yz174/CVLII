@@ -3,18 +3,14 @@
 import asyncio
 import sys
 import logging
-import re
+import os
+import pty
+import subprocess
 from pathlib import Path
 from typing import Optional
 
 import asyncssh
 from asyncssh import SSHServerProcess, SSHServerConnection, SSHServerSession, TerminalSizeChanged, BreakReceived
-
-# Compiled regex patterns for filtering terminal query responses
-# These are responses the terminal sends back when queried by the TUI
-CSI_CURSOR_RE = re.compile(rb'\x1b\[\d{1,3};\d{1,3}R')         # Cursor position report: ESC[24;80R
-CSI_MODE_REPORT_RE = re.compile(rb'\x1b\[\?[\d;]*\$[A-Za-z]')  # Mode report: ESC[?2048;0$y
-CSI_MOUSE_RE = re.compile(rb'\x1b\[<[\d;]*[Mm]')               # Mouse sequences: ESC[<0;24;80M
 
 
 # Configure logging
@@ -71,156 +67,106 @@ class ResumeSSHServer(asyncssh.SSHServer):
 
 
 async def handle_client(process: SSHServerProcess) -> None:
-    """Handle SSH client by running the TUI application"""
-    logger.info("Starting TUI application for user")
+    """Handle SSH client by running the TUI application in a PTY"""
+    logger.info("Starting PTY-backed TUI session")
     
     try:
         # Get terminal information
-        term_type = process.get_terminal_type()
+        term_type = process.get_terminal_type() or "xterm-256color"
         term_size = process.get_terminal_size()
         
-        width = term_size[0] if term_size else 80
-        height = term_size[1] if term_size else 24
+        cols = term_size[0] if term_size else 80
+        rows = term_size[1] if term_size else 24
         
-        logger.info(f"Terminal: {term_type}, Size: {width}x{height}")
+        logger.info(f"Terminal: {term_type}, Size: {cols}x{rows}")
         
         # Set environment variables for subprocess
-        import os
         env = os.environ.copy()
-        env['TERM'] = term_type or 'xterm-256color'
-        env['COLUMNS'] = str(width)
-        env['LINES'] = str(height)
-        env['PYTHONUNBUFFERED'] = '1'
+        env["TERM"] = term_type
+        env["COLUMNS"] = str(cols)
+        env["LINES"] = str(rows)
+        env["PYTHONUNBUFFERED"] = "1"
         
-        # Create command to run the app directly
-        cmd = f'{sys.executable} -u run_ssh_app_direct.py'
+        # ---- CREATE PTY ----
+        # This creates a pseudo-terminal pair (master/slave)
+        # The slave acts like a real terminal device for the TUI app
+        master_fd, slave_fd = pty.openpty()
         
-        logger.info(f"Starting subprocess: {cmd}")
+        # Command to run the TUI app
+        cmd = [sys.executable, "-u", "run_ssh_app_direct.py"]
+        
+        logger.info(f"Starting subprocess in PTY: {' '.join(cmd)}")
         logger.info(f"Working directory: {os.getcwd()}")
         
-        # Create subprocess with pipes (no PTY needed - Textual will adapt)
-        proc = await asyncio.create_subprocess_shell(
+        # Spawn subprocess attached to the slave side of the PTY
+        # This gives Textual a real terminal device (/dev/pts/X)
+        proc = subprocess.Popen(
             cmd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
             env=env,
-            cwd=os.getcwd()
+            cwd=os.getcwd(),
+            preexec_fn=os.setsid,  # Create new session
+            close_fds=True,
         )
         
         logger.info(f"Subprocess started with PID: {proc.pid}")
         
-        # Create tasks to bridge SSH streams and subprocess pipes
-        async def pipe_stdin():
-            """Copy data from SSH client to subprocess stdin, filtering terminal query responses"""
-            try:
-                buffer = b""
-                while True:
-                    try:
-                        data = await process.stdin.read(4096)
-                        if not data:
-                            break
-                        
-                        # Make sure we have bytes
-                        if isinstance(data, str):
-                            chunk = data.encode('utf-8', errors='replace')
-                        else:
-                            chunk = data
-                        
-                        buffer += chunk
-                        
-                        # Remove terminal query responses using regex patterns
-                        # These are responses the terminal sends when queried - they should NOT
-                        # be forwarded as keyboard input to the TUI app
-                        
-                        # Remove mode reports (ESC[?2048;0$y etc.)
-                        filtered = CSI_MODE_REPORT_RE.sub(b'', buffer)
-                        # Remove cursor position reports (ESC[24;80R etc.)
-                        filtered = CSI_CURSOR_RE.sub(b'', filtered)
-                        # Remove mouse reporting sequences (ESC[<0;24;80M etc.)
-                        filtered = CSI_MOUSE_RE.sub(b'', filtered)
-                        
-                        # Write filtered data to subprocess
-                        if filtered:
-                            try:
-                                proc.stdin.write(filtered)
-                                await proc.stdin.drain()
-                            except Exception:
-                                # Subprocess stdin might be closed
-                                break
-                        
-                        # Clear buffer after processing
-                        buffer = b''
-                        
-                    except TerminalSizeChanged:
-                        continue
-                    except BreakReceived:
-                        continue
-            except Exception as e:
-                logger.debug(f"stdin pipe closed: {e}")
-            finally:
-                try:
-                    if proc.stdin and not proc.stdin.is_closing():
-                        proc.stdin.close()
-                        await proc.stdin.wait_closed()
-                except:
-                    pass
+        # Close slave fd in parent (only child uses it)
+        os.close(slave_fd)
         
-        async def pipe_stdout():
-            """Copy data from subprocess stdout to SSH client"""
+        loop = asyncio.get_running_loop()
+        
+        # ---- PTY master → SSH client ----
+        async def pty_to_ssh():
+            """Read from PTY master and send to SSH client"""
             try:
                 while True:
-                    data = await proc.stdout.read(8192)
+                    # Use executor for blocking os.read
+                    data = await loop.run_in_executor(
+                        None, os.read, master_fd, 8192
+                    )
                     if not data:
                         break
-                    # Subprocess provides bytes, SSH needs string
-                    if isinstance(data, bytes):
-                        data = data.decode('utf-8', errors='replace')
-                    process.stdout.write(data)
+                    
+                    # Decode and send to SSH client
+                    process.stdout.write(
+                        data.decode("utf-8", errors="replace")
+                    )
                     await process.stdout.drain()
             except Exception as e:
-                logger.debug(f"stdout pipe closed: {e}")
+                logger.debug(f"pty_to_ssh closed: {e}")
         
-        async def pipe_stderr():
-            """Copy data from subprocess stderr to SSH client"""
+        # ---- SSH client → PTY master ----
+        async def ssh_to_pty():
+            """Read from SSH client and write to PTY master"""
             try:
                 while True:
-                    data = await proc.stderr.read(8192)
+                    data = await process.stdin.read(4096)
                     if not data:
                         break
-                    # Subprocess provides bytes, SSH needs string
-                    if isinstance(data, bytes):
-                        data = data.decode('utf-8', errors='replace')
-                    # Send stderr directly without prefix (TUI might use stderr)
-                    process.stdout.write(data)
-                    await process.stdout.drain()
+                    
+                    # Ensure bytes
+                    if isinstance(data, str):
+                        data = data.encode("utf-8", errors="replace")
+                    
+                    # Write to PTY master (blocking)
+                    await loop.run_in_executor(
+                        None, os.write, master_fd, data
+                    )
             except Exception as e:
-                logger.debug(f"stderr pipe closed: {e}")
+                logger.debug(f"ssh_to_pty closed: {e}")
         
-        # Run all pipes concurrently and wait for process to finish
-        try:
-            await asyncio.gather(
-                pipe_stdin(),
-                pipe_stdout(),
-                pipe_stderr(),
-                proc.wait(),
-                return_exceptions=True
-            )
-        finally:
-            # Ensure subprocess is terminated
-            if proc.returncode is None:
-                try:
-                    proc.terminate()
-                    await asyncio.wait_for(proc.wait(), timeout=2.0)
-                except asyncio.TimeoutError:
-                    proc.kill()
-                    await proc.wait()
-                except:
-                    pass
+        # Run all tasks concurrently
+        await asyncio.gather(
+            pty_to_ssh(),
+            ssh_to_pty(),
+            loop.run_in_executor(None, proc.wait),
+            return_exceptions=True,
+        )
         
-        # Check subprocess exit code
-        exit_code = proc.returncode if proc.returncode is not None else 0
-        logger.info(f"TUI application exited with code {exit_code}")
+        logger.info(f"TUI application exited with code {proc.returncode}")
         
     except Exception as e:
         logger.error(f"Error running TUI app: {e}", exc_info=True)
@@ -229,12 +175,18 @@ async def handle_client(process: SSHServerProcess) -> None:
         except:
             pass
     finally:
-        # Only call exit if connection is still active
+        # Clean up PTY
+        try:
+            os.close(master_fd)
+        except:
+            pass
+        
+        # Exit SSH session
         try:
             if not process.channel.is_closing():
                 process.exit(0)
         except:
-            pass  # Connection already closed
+            pass
 
 
 async def start_server(host: str = '', port: int = 2222, host_key: str = 'host_key'):
