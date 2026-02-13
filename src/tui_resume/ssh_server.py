@@ -6,6 +6,9 @@ import logging
 import os
 import pty
 import subprocess
+import fcntl
+import termios
+import struct
 from pathlib import Path
 from typing import Optional
 
@@ -66,11 +69,43 @@ class ResumeSSHServer(asyncssh.SSHServer):
         return False
 
 
+class ResumeSSHSession(asyncssh.SSHServerSession):
+    """SSH Session handler that accepts PTY requests"""
+    
+    def __init__(self):
+        self._process = None
+    
+    def connection_made(self, chan):
+        """Called when session connection is established"""
+        self._chan = chan
+    
+    def pty_requested(self, term_type, term_size, term_modes):
+        """Accept PTY request from client - critical for proper terminal behavior"""
+        logger.debug(f"PTY requested: {term_type}, size: {term_size}")
+        return True
+    
+    def shell_requested(self):
+        """Accept shell request - our TUI is the shell"""
+        logger.debug("Shell requested")
+        return True
+
+
 async def handle_client(process: SSHServerProcess) -> None:
     """Handle SSH client by running the TUI application in a PTY"""
     logger.info("Starting PTY-backed TUI session")
     
     try:
+        # Set PTY size to match SSH client terminal
+        def set_pty_size(fd, cols, rows):
+            """Set the terminal size for the PTY"""
+            fcntl.ioctl(
+                fd,
+                termios.TIOCSWINSZ,
+                struct.pack("HHHH", rows, cols, 0, 0)
+            )
+        
+        set_pty_size(master_fd, cols, rows)
+        
         # Get terminal information
         term_type = process.get_terminal_type() or "xterm-256color"
         term_size = process.get_terminal_size()
@@ -201,8 +236,8 @@ async def start_server(host: str = '', port: int = 2222, host_key: str = 'host_k
     
     # Create logs directory if it doesn't exist
     Path('logs').mkdir(exist_ok=True)
-    
-    logger.info(f"Starting SSH server on {host or '0.0.0.0'}:{port}")
+    session_factory=ResumeSSHSession,  # Critical: Accept PTY requests
+            # Disable other SSH features for securityrver on {host or '0.0.0.0'}:{port}")
     logger.info("Waiting for connections...")
     
     try:
