@@ -91,7 +91,7 @@ class ResumeSSHSession(asyncssh.SSHServerSession):
     def connection_made(self, chan):
         """Called when session connection is established"""
         self.chan = chan
-        self.loop = asyncio.get_event_loop()
+        self.loop = self.chan.get_loop()  # Use AsyncSSH's event loop, not generic asyncio loop
         logger.debug("Session connection established")
     
     def pty_requested(self, term_type, term_size, term_modes):
@@ -109,7 +109,7 @@ class ResumeSSHSession(asyncssh.SSHServerSession):
     def shell_requested(self):
         """Accept shell request - launch TUI asynchronously"""
         logger.debug("Shell requested - launching TUI")
-        asyncio.create_task(self.start_tui())
+        self.loop.create_task(self.start_tui())  # Schedule on AsyncSSH's loop
         return True
     
     def exec_requested(self, command):
