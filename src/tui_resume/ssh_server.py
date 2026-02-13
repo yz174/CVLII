@@ -93,7 +93,14 @@ class ResumeSSHSession(asyncssh.SSHServerSession):
     def shell_requested(self):
         """Accept shell request - our TUI is the shell"""
         logger.debug("Shell requested")
+        # Force raw mode at channel level for Windows compatibility
+        self._chan.set_line_mode(False)
         return True
+    
+    def exec_requested(self, command):
+        """Reject exec commands - force PTY/shell only"""
+        logger.debug(f"Exec command rejected: {command}")
+        return False
 
 
 async def handle_client(process: SSHServerProcess) -> None:
