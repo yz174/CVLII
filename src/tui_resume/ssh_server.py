@@ -79,8 +79,8 @@ class ResumeSSHSession(asyncssh.SSHServerSession):
     """SSH Session handler that accepts PTY requests and manages TUI lifecycle"""
     
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        
+        # AsyncSSH passes arguments but SSHServerSession has no __init__
+        # We accept them but don't forward to super() to avoid object.__init__() error
         self.master_fd = None
         self.proc = None
         self.loop = None
