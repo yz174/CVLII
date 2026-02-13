@@ -95,18 +95,7 @@ async def handle_client(process: SSHServerProcess) -> None:
     logger.info("Starting PTY-backed TUI session")
     
     try:
-        # Set PTY size to match SSH client terminal
-        def set_pty_size(fd, cols, rows):
-            """Set the terminal size for the PTY"""
-            fcntl.ioctl(
-                fd,
-                termios.TIOCSWINSZ,
-                struct.pack("HHHH", rows, cols, 0, 0)
-            )
-        
-        set_pty_size(master_fd, cols, rows)
-        
-        # Get terminal information
+        # Get terminal information FIRST
         term_type = process.get_terminal_type() or "xterm-256color"
         term_size = process.get_terminal_size()
         
@@ -126,6 +115,17 @@ async def handle_client(process: SSHServerProcess) -> None:
         # This creates a pseudo-terminal pair (master/slave)
         # The slave acts like a real terminal device for the TUI app
         master_fd, slave_fd = pty.openpty()
+        
+        # NOW set PTY size to match SSH client terminal
+        def set_pty_size(fd, cols, rows):
+            """Set the terminal size for the PTY"""
+            fcntl.ioctl(
+                fd,
+                termios.TIOCSWINSZ,
+                struct.pack("HHHH", rows, cols, 0, 0)
+            )
+        
+        set_pty_size(master_fd, cols, rows)
         
         # Command to run the TUI app
         cmd = [sys.executable, "-u", "run_ssh_app_direct.py"]
@@ -236,8 +236,8 @@ async def start_server(host: str = '', port: int = 2222, host_key: str = 'host_k
     
     # Create logs directory if it doesn't exist
     Path('logs').mkdir(exist_ok=True)
-    session_factory=ResumeSSHSession,  # Critical: Accept PTY requests
-            # Disable other SSH features for securityrver on {host or '0.0.0.0'}:{port}")
+    
+    logger.info(f"Starting SSH server on {host or '0.0.0.0'}:{port}")
     logger.info("Waiting for connections...")
     
     try:
@@ -247,8 +247,8 @@ async def start_server(host: str = '', port: int = 2222, host_key: str = 'host_k
             server_host_keys=[host_key],
             server_factory=ResumeSSHServer,
             process_factory=handle_client,
+            session_factory=ResumeSSHSession,  # Critical: Accept PTY requests
             # Disable other SSH features for security
-            session_factory=None,
             sftp_factory=None,
             allow_scp=False,
         )
