@@ -258,6 +258,7 @@ async def start_server(host: str = '', port: int = 2222, host_key: str = 'host_k
             server_factory=ResumeSSHServer,
             process_factory=handle_client,
             session_factory=ResumeSSHSession,  # Critical: Accept PTY requests
+            line_editor=False,  # CRITICAL: Disable line editor for raw terminal mode (TUI needs immediate key forwarding)
             # Disable other SSH features for security
             sftp_factory=None,
             allow_scp=False,
