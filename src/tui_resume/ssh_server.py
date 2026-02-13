@@ -88,13 +88,16 @@ class ResumeSSHSession(asyncssh.SSHServerSession):
     def pty_requested(self, term_type, term_size, term_modes):
         """Accept PTY request from client - critical for proper terminal behavior"""
         logger.debug(f"PTY requested: {term_type}, size: {term_size}")
+        # ⭐ CRITICAL: Set raw mode DURING PTY negotiation for Windows compatibility
+        # Windows SSH clients lock input mode at PTY allocation time
+        # Linux/macOS renegotiate automatically, Windows does not
+        self._chan.set_line_mode(False)  # Disable canonical input (line buffering)
+        self._chan.set_echo(False)       # Disable server-side echo
         return True
     
     def shell_requested(self):
         """Accept shell request - our TUI is the shell"""
         logger.debug("Shell requested")
-        # Force raw mode at channel level for Windows compatibility
-        self._chan.set_line_mode(False)
         return True
     
     def exec_requested(self, command):
