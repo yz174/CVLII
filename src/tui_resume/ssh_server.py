@@ -80,6 +80,7 @@ class ResumeSSHSession(asyncssh.SSHServerSession):
     
     def __init__(self):
         self._process = None
+        self.master_fd = None  # Will be set by handle_client
     
     def connection_made(self, chan):
         """Called when session connection is established"""
@@ -104,6 +105,21 @@ class ResumeSSHSession(asyncssh.SSHServerSession):
         """Reject exec commands - force PTY/shell only"""
         logger.debug(f"Exec command rejected: {command}")
         return False
+    
+    def data_received(self, data, datatype):
+        """⭐ CRITICAL: Direct keyboard input routing for Windows compatibility
+        Windows OpenSSH sends keyboard input as SSH channel data packets
+        that don't reach process.stdin.read() in custom PTY configurations.
+        This callback receives ALL client input regardless of OS."""
+        if self.master_fd is not None:
+            try:
+                # Ensure data is bytes
+                if isinstance(data, str):
+                    data = data.encode('utf-8')
+                # Write directly to PTY master (blocking operation)
+                os.write(self.master_fd, data)
+            except OSError as e:
+                logger.debug(f"Failed to write to PTY: {e}")
 
 
 async def handle_client(process: SSHServerProcess) -> None:
@@ -131,6 +147,11 @@ async def handle_client(process: SSHServerProcess) -> None:
         # This creates a pseudo-terminal pair (master/slave)
         # The slave acts like a real terminal device for the TUI app
         master_fd, slave_fd = pty.openpty()
+        
+        # ⭐ CRITICAL: Connect PTY to session for direct input routing
+        # Windows SSH clients send input via data_received() callback, not stdin
+        session = process.get_extra_info("session")
+        session.master_fd = master_fd
         
         # ---- CRITICAL: Set PTY to RAW mode ----
         # This disables line buffering and allows immediate keyboard input
@@ -199,30 +220,13 @@ async def handle_client(process: SSHServerProcess) -> None:
             except Exception as e:
                 logger.debug(f"pty_to_ssh closed: {e}")
         
-        # ---- SSH client → PTY master ----
-        async def ssh_to_pty():
-            """Read from SSH client and write to PTY master"""
-            try:
-                while True:
-                    data = await process.stdin.read(4096)
-                    if not data:
-                        break
-                    
-                    # Ensure bytes
-                    if isinstance(data, str):
-                        data = data.encode("utf-8", errors="replace")
-                    
-                    # Write to PTY master (blocking)
-                    await loop.run_in_executor(
-                        None, os.write, master_fd, data
-                    )
-            except Exception as e:
-                logger.debug(f"ssh_to_pty closed: {e}")
+        # ⭐ NOTE: SSH input now handled by session.data_received() callback
+        # This fixes Windows compatibility where process.stdin.read() misses
+        # keyboard input sent as SSH extended data packets
         
         # Run all tasks concurrently
         await asyncio.gather(
             pty_to_ssh(),
-            ssh_to_pty(),
             loop.run_in_executor(None, proc.wait),
             return_exceptions=True,
         )
