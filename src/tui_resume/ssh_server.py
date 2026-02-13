@@ -85,6 +85,7 @@ class ResumeSSHSession(asyncssh.SSHServerSession):
     def connection_made(self, chan):
         """Called when session connection is established"""
         self._chan = chan
+        chan.session = self  # ⭐ Attach session to channel for access from process
     
     def pty_requested(self, term_type, term_size, term_modes):
         """Accept PTY request from client - critical for proper terminal behavior"""
@@ -150,8 +151,9 @@ async def handle_client(process: SSHServerProcess) -> None:
         
         # ⭐ CRITICAL: Connect PTY to session for direct input routing
         # Windows SSH clients send input via data_received() callback, not stdin
-        session = process.get_extra_info("session")
-        session.master_fd = master_fd
+        session = process.channel.session
+        if session is not None:
+            session.master_fd = master_fd
         
         # ---- CRITICAL: Set PTY to RAW mode ----
         # This disables line buffering and allows immediate keyboard input
