@@ -3,11 +3,18 @@
 import asyncio
 import sys
 import logging
+import re
 from pathlib import Path
 from typing import Optional
 
 import asyncssh
 from asyncssh import SSHServerProcess, SSHServerConnection, SSHServerSession, TerminalSizeChanged, BreakReceived
+
+# Compiled regex patterns for filtering terminal query responses
+# These are responses the terminal sends back when queried by the TUI
+CSI_CURSOR_RE = re.compile(rb'\x1b\[\d{1,3};\d{1,3}R')         # Cursor position report: ESC[24;80R
+CSI_MODE_REPORT_RE = re.compile(rb'\x1b\[\?[\d;]*\$[A-Za-z]')  # Mode report: ESC[?2048;0$y
+CSI_MOUSE_RE = re.compile(rb'\x1b\[<[\d;]*[Mm]')               # Mouse sequences: ESC[<0;24;80M
 
 
 # Configure logging
@@ -105,7 +112,7 @@ async def handle_client(process: SSHServerProcess) -> None:
         
         # Create tasks to bridge SSH streams and subprocess pipes
         async def pipe_stdin():
-            """Copy data from SSH client to subprocess stdin"""
+            """Copy data from SSH client to subprocess stdin, filtering terminal query responses"""
             try:
                 buffer = b""
                 while True:
@@ -113,86 +120,38 @@ async def handle_client(process: SSHServerProcess) -> None:
                         data = await process.stdin.read(4096)
                         if not data:
                             break
-                        # SSH provides string, subprocess needs bytes
+                        
+                        # Make sure we have bytes
                         if isinstance(data, str):
-                            data = data.encode('utf-8')
+                            chunk = data.encode('utf-8', errors='replace')
+                        else:
+                            chunk = data
                         
-                        # Add to buffer for processing
-                        buffer += data
+                        buffer += chunk
                         
-                        # Filter out terminal query responses (CSI responses)
-                        # These include: cursor position reports, device attributes, mode reports, etc.
-                        # Patterns to filter:
-                        # - ESC[digits;digitsR (cursor position report)
-                        # - ESC[?digits;digits$letter (mode report like ?2048;0$y)
-                        # - ESC[digits;digits$letter (other reports)
-                        # - ESC[<...M or ESC[<...m (mouse sequences)
-                        filtered = b""
-                        i = 0
-                        last_complete = 0  # Track last byte we fully processed
+                        # Remove terminal query responses using regex patterns
+                        # These are responses the terminal sends when queried - they should NOT
+                        # be forwarded as keyboard input to the TUI app
                         
-                        while i < len(buffer):
-                            # Check for escape sequence responses
-                            if buffer[i:i+1] == b'\x1b':
-                                if i+1 >= len(buffer):
-                                    # Incomplete ESC sequence, keep in buffer
-                                    break
-                                if buffer[i+1:i+2] == b'[':
-                                    # This is a CSI sequence, check if it's a response
-                                    j = i + 2
-                                    
-                                    # Check for optional ? or > after [
-                                    if j < len(buffer) and buffer[j:j+1] in b'?>':
-                                        j += 1
-                                    
-                                    # Skip digits, semicolons
-                                    while j < len(buffer) and buffer[j:j+1] in b'0123456789;':
-                                        j += 1
-                                    
-                                    # Need terminator to complete the sequence
-                                    if j >= len(buffer):
-                                        # Incomplete sequence, keep in buffer
-                                        break
-                                    
-                                    # Check for response terminators
-                                    terminator = buffer[j:j+1]
-                                    if terminator == b'$':
-                                        # Mode report: need one more byte (the letter)
-                                        if j+1 >= len(buffer):
-                                            # Incomplete, keep in buffer
-                                            break
-                                        # Complete response like ?2048;0$y - skip it
-                                        i = j + 2
-                                        last_complete = i
-                                        continue
-                                    elif terminator in b'R~':
-                                        # Complete cursor position or other response - skip it
-                                        i = j + 1
-                                        last_complete = i
-                                        continue
-                                    elif terminator == b'<':
-                                        # Mouse sequence, find M or m terminator
-                                        while j < len(buffer) and buffer[j:j+1] not in b'Mm':
-                                            j += 1
-                                        if j >= len(buffer):
-                                            # Incomplete, keep in buffer
-                                            break
-                                        # Complete mouse sequence - skip it
-                                        i = j + 1
-                                        last_complete = i
-                                        continue
-                            
-                            # Not a response sequence, keep this byte
-                            filtered += buffer[i:i+1]
-                            i += 1
-                            last_complete = i
+                        # Remove mode reports (ESC[?2048;0$y etc.)
+                        filtered = CSI_MODE_REPORT_RE.sub(b'', buffer)
+                        # Remove cursor position reports (ESC[24;80R etc.)
+                        filtered = CSI_CURSOR_RE.sub(b'', filtered)
+                        # Remove mouse reporting sequences (ESC[<0;24;80M etc.)
+                        filtered = CSI_MOUSE_RE.sub(b'', filtered)
                         
-                        # Keep incomplete sequences in buffer for next iteration
-                        buffer = buffer[last_complete:]
-                        
+                        # Write filtered data to subprocess
                         if filtered:
-                            proc.stdin.write(filtered)
-                            await proc.stdin.drain()
+                            try:
+                                proc.stdin.write(filtered)
+                                await proc.stdin.drain()
+                            except Exception:
+                                # Subprocess stdin might be closed
+                                break
+                        
+                        # Clear buffer after processing
+                        buffer = b''
+                        
                     except TerminalSizeChanged:
                         continue
                     except BreakReceived:
