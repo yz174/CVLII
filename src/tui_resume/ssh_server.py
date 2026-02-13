@@ -105,7 +105,12 @@ async def handle_client(process: SSHServerProcess) -> None:
         # Get terminal information
         term_type = process.get_terminal_type() or "xterm-256color"
         term_size = process.get_terminal_size()
-        cols, rows = term_size or (80, 24)
+        
+        # AsyncSSH returns (cols, rows, pixel_width, pixel_height) - extract first two
+        if term_size:
+            cols, rows = term_size[0], term_size[1]
+        else:
+            cols, rows = 80, 24
         
         logger.info(f"Terminal: {term_type}, Size: {cols}x{rows}")
         
