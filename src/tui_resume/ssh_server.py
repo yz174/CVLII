@@ -78,7 +78,9 @@ class ResumeSSHServer(asyncssh.SSHServer):
 class ResumeSSHSession(asyncssh.SSHServerSession):
     """SSH Session handler that accepts PTY requests and manages TUI lifecycle"""
     
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        
         self.master_fd = None
         self.proc = None
         self.loop = None
