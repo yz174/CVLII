@@ -110,7 +110,8 @@ class ResumeSSHSession(asyncssh.SSHServerSession):
     def shell_requested(self):
         """Accept shell request and launch TUI asynchronously"""
         logger.debug("Shell requested - launching TUI")
-        asyncio.create_task(self.start_tui())
+        loop = self.chan.get_loop()
+        loop.create_task(self.start_tui())
         return True
     
     async def start_tui(self):
