@@ -162,13 +162,19 @@ async def handle_client(process: SSHServerProcess) -> None:
             except Exception as e:
                 logger.debug(f"Output forwarding closed: {e}")
         
-        # Forward input: stdin stream → PTY (Linux/macOS path)
+        # Forward input: stdin stream → PTY (all platforms)
         async def forward_stdin_input():
+            loop = asyncio.get_running_loop()
             try:
-                async for data in process.stdin:
+                while True:
+                    data = await process.stdin.read(4096)
+                    if not data:
+                        break
+                    
                     if isinstance(data, str):
                         data = data.encode()
-                    os.write(master_fd, data)
+                    
+                    await loop.run_in_executor(None, os.write, master_fd, data)
             except Exception as e:
                 logger.debug(f"Input forwarding closed: {e}")
         
