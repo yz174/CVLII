@@ -80,7 +80,7 @@ class ResumeSSHSession(asyncssh.SSHServerSession):
     
     def __init__(self, *args, **kwargs):
         # AsyncSSH passes arguments but SSHServerSession has no __init__
-        pass
+        self.master_fd = None  # Will be set by handle_client for Windows input routing
     
     def connection_made(self, chan):
         """Called when session connection is established"""
@@ -95,6 +95,18 @@ class ResumeSSHSession(asyncssh.SSHServerSession):
     def shell_requested(self):
         """Accept shell request - actual TUI launch happens in process_factory"""
         return True
+    
+    def data_received(self, data, datatype):
+        """⭐ CRITICAL: Windows SSH keyboard input path
+        Windows OpenSSH sends keyboard input as SSH channel data packets
+        that don't reach process.stdin.read() - this callback handles them."""
+        if self.master_fd is not None:
+            try:
+                if isinstance(data, str):
+                    data = data.encode()
+                os.write(self.master_fd, data)
+            except OSError:
+                pass
 
 
 async def handle_client(process: SSHServerProcess) -> None:
@@ -124,6 +136,11 @@ async def handle_client(process: SSHServerProcess) -> None:
         # Create PTY
         master_fd, slave_fd = pty.openpty()
         tty.setraw(slave_fd)
+        
+        # ⭐ Link PTY to session for Windows keyboard input routing
+        session = process.get_extra_info("session")
+        if session:
+            session.master_fd = master_fd
         
         # Set PTY size
         fcntl.ioctl(
@@ -158,7 +175,7 @@ async def handle_client(process: SSHServerProcess) -> None:
                         break
                     # Filter terminal reply sequences
                     data = ANSI_REPLY_RE.sub(b"", data)
-                    process.stdout.write(data.decode(errors="replace"))
+                    process.stdout.write(data.decode("utf-8", "ignore"))
                     await process.stdout.drain()
             except Exception as e:
                 logger.debug(f"pty_to_ssh closed: {e}")
