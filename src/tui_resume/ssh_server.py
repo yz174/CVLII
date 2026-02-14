@@ -76,7 +76,7 @@ class ResumeSSHServer(asyncssh.SSHServer):
 
 
 class ResumeSSHSession(asyncssh.SSHServerSession):
-    """Minimal session handler for Windows input routing bridge"""
+    """Minimal session handler for SSH channel setup"""
     
     def connection_made(self, chan):
         """Called when session connection is established"""
@@ -91,28 +91,6 @@ class ResumeSSHSession(asyncssh.SSHServerSession):
     def shell_requested(self):
         """Accept shell request - process_factory handles TUI launch"""
         return True
-    
-    def data_received(self, data, datatype):
-        """⭐ Windows input bridge: Routes keyboard input to PTY master fd
-        
-        Windows OpenSSH sends input via channel packets, not stdin.
-        This bridge writes directly to the PTY master_fd exposed by the process.
-        """
-        process = self.chan.get_extra_info("process")
-        
-        if not process:
-            return
-        
-        master_fd = getattr(process, "_pty_master_fd", None)
-        if master_fd is None:
-            return
-        
-        try:
-            if isinstance(data, str):
-                data = data.encode()
-            os.write(master_fd, data)
-        except OSError as e:
-            logger.debug(f"Failed to write to PTY: {e}")
 
 
 async def handle_client(process: SSHServerProcess) -> None:
@@ -134,10 +112,15 @@ async def handle_client(process: SSHServerProcess) -> None:
         
         # Create PTY
         master_fd, slave_fd = pty.openpty()
-        tty.setraw(slave_fd)
         
-        # ⭐ Expose PTY master fd for session bridge (Windows input routing)
-        process._pty_master_fd = master_fd
+        # Configure PTY for raw mode (portable for Windows/Linux/macOS)
+        attrs = termios.tcgetattr(slave_fd)
+        # Disable canonical mode and echo
+        attrs[3] = attrs[3] & ~(termios.ICANON | termios.ECHO)
+        # Set 1 byte at a time input (immediate delivery)
+        attrs[6][termios.VMIN] = 1
+        attrs[6][termios.VTIME] = 0
+        termios.tcsetattr(slave_fd, termios.TCSANOW, attrs)
         
         # Set PTY size
         fcntl.ioctl(
@@ -234,7 +217,7 @@ async def start_server(host: str = '', port: int = 2222, host_key: str = 'host_k
             server_host_keys=[host_key],
             server_factory=ResumeSSHServer,
             process_factory=handle_client,      # ⭐ Primary: TUI lifecycle management
-            session_factory=ResumeSSHSession,   # ⭐ Bridge: Windows input routing via data_received()
+            session_factory=ResumeSSHSession,   # ⭐ PTY setup: Raw mode channel configuration
             line_editor=False,  # CRITICAL: Disable line editor for raw terminal mode
             # Disable other SSH features for security
             sftp_factory=None,
