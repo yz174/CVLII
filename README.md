@@ -1,4 +1,4 @@
-# TUI Resume - Interactive Terminal Portfolio
+# CVLI - Interactive Terminal Portfolio
 
 A Terminal User Interface (TUI) application serving as an interactive professional portfolio accessible via SSH from anywhere. Connect to your resume using any SSH client and explore your professional profile through an animated, game-like interface.
 
