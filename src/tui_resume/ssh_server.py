@@ -90,7 +90,6 @@ class ResumeSSHSession(asyncssh.SSHServerSession):
     def connection_made(self, chan):
         """Called when session connection is established"""
         self.chan = chan
-        self.loop = asyncio.get_running_loop()
         logger.debug("Session connection established")
     
     def pty_requested(self, term_type, term_size, term_modes):
@@ -111,12 +110,13 @@ class ResumeSSHSession(asyncssh.SSHServerSession):
     def shell_requested(self):
         """Accept shell request and launch TUI asynchronously"""
         logger.debug("Shell requested - launching TUI")
-        self.loop.create_task(self.start_tui())
+        asyncio.create_task(self.start_tui())
         return True
     
     async def start_tui(self):
         """Launch the TUI application in a PTY owned by this session"""
         try:
+            self.loop = asyncio.get_running_loop()  # Get loop here when coroutine is actually running
             logger.info(f"Starting TUI: Terminal={self.term_type}, Size={self.cols}x{self.rows}")
             
             # Environment variables
