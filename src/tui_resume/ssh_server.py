@@ -1,11 +1,13 @@
-"""SSH Server wrapper for TUI Resume application"""
+"""
+SSH Server wrapper for TUI Resume application
+CROSS-PLATFORM (Linux / macOS / Windows OpenSSH)
+"""
 
 import asyncio
 import sys
 import logging
 import os
 import pty
-import tty
 import subprocess
 import fcntl
 import termios
@@ -15,139 +17,142 @@ from pathlib import Path
 from typing import Optional
 
 import asyncssh
-from asyncssh import SSHServerProcess, SSHServerConnection, SSHServerSession, TerminalSizeChanged, BreakReceived
+from asyncssh import SSHServer, SSHServerSession, SSHServerProcess
 
-# Regex to filter terminal reply sequences from PTY output
-# Matches sequences like ESC[?2048;0$y (mode reports) and ESC[?2026$y (device attributes)
+
+# ------------------------------------------------------------
+# Filter terminal reply artifacts from Textual
+# ------------------------------------------------------------
 ANSI_REPLY_RE = re.compile(rb'\x1b\[\?\d+(?:;\d+)*\$[a-zA-Z]')
 
 
-# Configure logging
+# ------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler('logs/connections.log'),
-        logging.StreamHandler()
-    ]
+        logging.FileHandler("logs/connections.log"),
+        logging.StreamHandler(),
+    ],
 )
+
 logger = logging.getLogger(__name__)
 
 
-class ResumeSSHServer(asyncssh.SSHServer):
-    """SSH Server for the TUI Resume application"""
-    
-    def connection_made(self, conn: SSHServerConnection) -> None:
-        """Called when a connection is established"""
-        peer = conn.get_extra_info('peername')
-        logger.info(f"Connection received from {peer[0]}:{peer[1]}")
-    
-    def connection_lost(self, exc: Optional[Exception]) -> None:
-        """Called when a connection is lost"""
+# ============================================================
+# SSH SERVER
+# ============================================================
+
+class ResumeSSHServer(SSHServer):
+
+    def connection_made(self, conn):
+        peer = conn.get_extra_info("peername")
+        logger.info(f"Connection from {peer[0]}:{peer[1]}")
+
+    def connection_lost(self, exc):
         if exc:
-            logger.error(f"Connection lost with error: {exc}")
+            logger.error(f"Connection lost: {exc}")
         else:
-            logger.info("Connection closed normally")
-    
-    def begin_auth(self, username: str) -> bool:
-        """
-        Authentication callback - no authentication required for public access
-        Return False and use password_auth_supported to bypass auth
-        """
-        logger.info(f"Connection from user: {username} - no auth required")
-        return False  # Skip authentication entirely
-    
-    def password_auth_supported(self) -> bool:
-        """Enable password authentication (accept any/empty password)"""
-        return True
-    
-    def validate_password(self, username: str, password: str) -> bool:
-        """Accept any password including empty string"""
-        logger.info(f"User {username} connected (public access)")
-        return True
-    
-    def public_key_auth_supported(self) -> bool:
-        """Disable public key authentication"""
-        return False
-    
-    def kbdint_auth_supported(self) -> bool:
-        """Disable keyboard-interactive authentication"""
+            logger.info("Connection closed")
+
+    # Public access (no auth)
+    def begin_auth(self, username):
         return False
 
+    def password_auth_supported(self):
+        return True
 
-class ResumeSSHSession(asyncssh.SSHServerSession):
-    """Minimal session handler for SSH channel setup"""
-    
+    def validate_password(self, username, password):
+        return True
+
+
+# ============================================================
+# SESSION (WINDOWS INPUT PATH)
+# ============================================================
+
+class ResumeSSHSession(SSHServerSession):
+    """
+    Handles PTY negotiation + Windows keyboard input routing.
+    """
+
     def connection_made(self, chan):
-        """Called when session connection is established"""
         self.chan = chan
-        self.master_fd = None  # Will be set by handle_client for Windows input bridge
-    
+
     def pty_requested(self, term_type, term_size, term_modes):
-        """Accept PTY request and set raw mode for cross-platform compatibility"""
-        self.chan.set_line_mode(False)  # Disable canonical input
-        self.chan.set_echo(False)       # Disable server-side echo
+        # RAW MODE — REQUIRED
+        self.chan.set_line_mode(False)
+        self.chan.set_echo(False)
         return True
-    
+
     def shell_requested(self):
-        """Accept shell request - process_factory handles TUI launch"""
         return True
-    
+
+    # ⭐ Windows keyboard input arrives HERE
     def data_received(self, data, datatype):
-        """Windows input bridge: Windows OpenSSH sends keyboard input here"""
-        if self.master_fd is None:
+
+        master_fd = getattr(self.chan, "_pty_master_fd", None)
+
+        if master_fd is None:
             return
-        
+
         try:
             if isinstance(data, str):
                 data = data.encode()
-            os.write(self.master_fd, data)
+
+            os.write(master_fd, data)
+
         except OSError:
             pass
 
 
-async def handle_client(process: SSHServerProcess) -> None:
-    """Process factory handler - manages TUI lifecycle with PTY"""
+# ============================================================
+# PROCESS FACTORY (TUI LIFECYCLE)
+# ============================================================
+
+async def handle_client(process: SSHServerProcess):
+
     try:
-        # Get terminal info
+        # ---------------- Terminal info ----------------
         term_type = process.get_terminal_type() or "xterm-256color"
         term_size = process.get_terminal_size()
+
         cols, rows = (term_size[0], term_size[1]) if term_size else (80, 24)
-        
-        logger.info(f"Starting TUI: Terminal={term_type}, Size={cols}x{rows}")
-        
-        # Environment setup
+
+        logger.info(f"TUI start: {term_type} {cols}x{rows}")
+
         env = os.environ.copy()
         env["TERM"] = term_type
         env["COLUMNS"] = str(cols)
         env["LINES"] = str(rows)
         env["PYTHONUNBUFFERED"] = "1"
-        
-        # Create PTY
+
+        # ---------------- PTY ----------------
         master_fd, slave_fd = pty.openpty()
-        
-        # Configure PTY for raw mode (portable for Windows/Linux/macOS)
+
+        # RAW MODE
         attrs = termios.tcgetattr(slave_fd)
-        # Disable canonical mode and echo
-        attrs[3] = attrs[3] & ~(termios.ICANON | termios.ECHO)
-        # Set 1 byte at a time input (immediate delivery)
+        attrs[3] &= ~(termios.ICANON | termios.ECHO)
         attrs[6][termios.VMIN] = 1
         attrs[6][termios.VTIME] = 0
         termios.tcsetattr(slave_fd, termios.TCSANOW, attrs)
-        
-        # Expose PTY master_fd to session for Windows input bridge
-        session = process.get_extra_info("session")
-        if session:
-            session.master_fd = master_fd
-        
-        # Set PTY size
+
+        # Window size
         fcntl.ioctl(
             master_fd,
             termios.TIOCSWINSZ,
             struct.pack("HHHH", rows, cols, 0, 0),
         )
-        
-        # Launch TUI subprocess
+
+        # ⭐ CRITICAL FIX:
+        # Bind PTY to CHANNEL (shared object)
+        chan = process.get_extra_info("channel")
+        if chan:
+            chan._pty_master_fd = master_fd
+            logger.info("Channel ↔ PTY binding established")
+
+        # ---------------- Launch TUI ----------------
         proc = subprocess.Popen(
             [sys.executable, "-u", "run_ssh_app_direct.py"],
             stdin=slave_fd,
@@ -158,112 +163,100 @@ async def handle_client(process: SSHServerProcess) -> None:
             preexec_fn=os.setsid,
             close_fds=True,
         )
-        
-        logger.info(f"TUI subprocess started with PID: {proc.pid}")
+
         os.close(slave_fd)
-        
-        # Forward output: PTY → stdin stream (Linux/macOS path)
-        async def forward_pty_output():
-            loop = asyncio.get_running_loop()
+
+        loop = asyncio.get_running_loop()
+
+        # --------------------------------------------------
+        # PTY → SSH client
+        # --------------------------------------------------
+        async def forward_output():
             try:
                 while True:
-                    data = await loop.run_in_executor(None, os.read, master_fd, 8192)
+                    data = await loop.run_in_executor(
+                        None, os.read, master_fd, 8192
+                    )
+
                     if not data:
                         break
-                    
-                    # Filter terminal reply sequences
+
                     data = ANSI_REPLY_RE.sub(b"", data)
-                    
-                    # Send to client
-                    process.stdout.write(data.decode("utf-8", "ignore"))
-                    
-            except Exception as e:
-                logger.debug(f"Output forwarding closed: {e}")
-        
-        # Forward input: stdin stream → PTY (all platforms)
-        async def forward_stdin_input():
-            loop = asyncio.get_running_loop()
+
+                    process.stdout.write(
+                        data.decode("utf-8", "ignore")
+                    )
+
+            except Exception:
+                pass
+
+        # --------------------------------------------------
+        # Linux/macOS input path
+        # --------------------------------------------------
+        async def forward_input():
             try:
                 while True:
                     data = await process.stdin.read(4096)
                     if not data:
                         break
-                    
+
                     if isinstance(data, str):
                         data = data.encode()
-                    
-                    await loop.run_in_executor(None, os.write, master_fd, data)
-            except Exception as e:
-                logger.debug(f"Input forwarding closed: {e}")
-        
-        # Run both forwarders
+
+                    await loop.run_in_executor(
+                        None, os.write, master_fd, data
+                    )
+
+            except Exception:
+                pass
+
         await asyncio.gather(
-            forward_pty_output(),
-            forward_stdin_input(),
-            return_exceptions=True
+            forward_output(),
+            forward_input(),
         )
-        
-        # Cleanup
-        try:
-            os.close(master_fd)
-        except:
-            pass
-        
+
         proc.wait()
-        logger.info(f"TUI process exited with code: {proc.returncode}")
+        os.close(master_fd)
+
+        logger.info(f"TUI exited ({proc.returncode})")
         process.exit(0)
-        
+
     except Exception as e:
-        logger.error(f"Error in handle_client: {e}", exc_info=True)
+        logger.exception(f"TUI failure: {e}")
         process.exit(1)
 
 
-async def start_server(host: str = '', port: int = 2222, host_key: str = 'host_key'):
-    """Start the SSH server"""
-    
-    # Check if host key exists
-    host_key_path = Path(host_key)
-    if not host_key_path.exists():
-        logger.error(f"Host key not found: {host_key}")
-        logger.error("Generate one with: ssh-keygen -f host_key -N '' -t rsa")
+# ============================================================
+# SERVER START
+# ============================================================
+
+async def start_server(host="", port=2222, host_key="host_key"):
+
+    if not Path(host_key).exists():
+        logger.error("Missing host_key")
         sys.exit(1)
-    
-    # Create logs directory if it doesn't exist
-    Path('logs').mkdir(exist_ok=True)
-    
+
+    Path("logs").mkdir(exist_ok=True)
+
     logger.info(f"Starting SSH server on {host or '0.0.0.0'}:{port}")
-    logger.info("Waiting for connections...")
-    
-    try:
-        await asyncssh.listen(
-            host,
-            port,
-            server_host_keys=[host_key],
-            server_factory=ResumeSSHServer,
-            process_factory=handle_client,      # ⭐ Primary: TUI lifecycle management
-            session_factory=ResumeSSHSession,   # ⭐ PTY setup: Raw mode channel configuration
-            line_editor=False,  # CRITICAL: Disable line editor for raw terminal mode
-            # Disable other SSH features for security
-            sftp_factory=None,
-            allow_scp=False,
-        )
-        
-        # Keep server running
-        await asyncio.Event().wait()
-        
-    except Exception as e:
-        logger.error(f"Failed to start SSH server: {e}", exc_info=True)
-        sys.exit(1)
+
+    await asyncssh.listen(
+        host,
+        port,
+        server_factory=ResumeSSHServer,
+        session_factory=ResumeSSHSession,
+        process_factory=handle_client,
+        server_host_keys=[host_key],
+        line_editor=False,
+        sftp_factory=None,
+        allow_scp=False,
+    )
+
+    await asyncio.Event().wait()
 
 
 def main():
-    """Main entry point"""
-    try:
-        asyncio.run(start_server())
-    except KeyboardInterrupt:
-        logger.info("Server stopped by user")
-    except Exception as e:
-        logger.error(f"Server error: {e}", exc_info=True)
+    asyncio.run(start_server())
 
 
 if __name__ == "__main__":
