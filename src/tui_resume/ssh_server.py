@@ -81,6 +81,7 @@ class ResumeSSHSession(asyncssh.SSHServerSession):
     def connection_made(self, chan):
         """Called when session connection is established"""
         self.chan = chan
+        self.master_fd = None  # Will be set by handle_client for Windows input bridge
     
     def pty_requested(self, term_type, term_size, term_modes):
         """Accept PTY request and set raw mode for cross-platform compatibility"""
@@ -91,6 +92,18 @@ class ResumeSSHSession(asyncssh.SSHServerSession):
     def shell_requested(self):
         """Accept shell request - process_factory handles TUI launch"""
         return True
+    
+    def data_received(self, data, datatype):
+        """Windows input bridge: Windows OpenSSH sends keyboard input here"""
+        if self.master_fd is None:
+            return
+        
+        try:
+            if isinstance(data, str):
+                data = data.encode()
+            os.write(self.master_fd, data)
+        except OSError:
+            pass
 
 
 async def handle_client(process: SSHServerProcess) -> None:
@@ -121,6 +134,11 @@ async def handle_client(process: SSHServerProcess) -> None:
         attrs[6][termios.VMIN] = 1
         attrs[6][termios.VTIME] = 0
         termios.tcsetattr(slave_fd, termios.TCSANOW, attrs)
+        
+        # Expose PTY master_fd to session for Windows input bridge
+        session = process.get_extra_info("session")
+        if session:
+            session.master_fd = master_fd
         
         # Set PTY size
         fcntl.ioctl(
