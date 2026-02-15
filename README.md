@@ -209,7 +209,7 @@ These patches are in [`run_ssh_app_direct.py`](run_ssh_app_direct.py).
 
 Connection logs and errors are written to `logs/connections.log`:
 ```python
-# View logs
+
 tail -f logs/connections.log
 
 # Docker logs
